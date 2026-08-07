@@ -1,0 +1,55 @@
+/* Global stylesheet.
+   Order matters and is resolved by postcss-import before Tailwind runs:
+     1. tokens.css   — CSS custom properties (single source of truth)
+     2. Tailwind base/components/utilities
+     3. components.css — named component classes, inside @layer components
+   Utilities are emitted last, so a Tailwind utility can always override a
+   component class when a one-off tweak is genuinely needed. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import "./styles/tokens.css";
+@import "./styles/components.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--sp-canvas);
+    color: var(--sp-ink-900);
+    font-family: var(--sp-font-sans);
+    font-size: var(--sp-body-size);
+    /* A page must never scroll sideways; wide content scrolls inside its own
+       container (.sp-table-wrap / .sp-scroll-x). */
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--sp-ink-900);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--sp-brand-500);
+    outline-offset: 2px;
+  }
+
+  /* Respect the OS reduced-motion preference. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

@@ -1,0 +1,436 @@
+/* ==========================================================================
+   SuwaPath component classes.
+   --------------------------------------------------------------------------
+   Every reusable visual pattern lives here as a named class, built from the
+   tokens in tokens.css. Pages compose these classes; they never define their
+   own colours, radii or shadows inline.
+   ========================================================================== */
+
+@layer components {
+  /* -------------------------------------------------------------- surface */
+  .sp-card {
+    background: var(--sp-surface);
+    border: 1px solid var(--sp-border);
+    border-radius: var(--sp-radius-lg);
+    box-shadow: var(--sp-shadow-sm);
+  }
+  .sp-card-pad {
+    padding: 1rem;
+  }
+  @media (min-width: 640px) {
+    .sp-card-pad {
+      padding: 1.25rem;
+    }
+  }
+  .sp-card-interactive {
+    transition: box-shadow var(--sp-transition), transform var(--sp-transition),
+      border-color var(--sp-transition);
+  }
+  .sp-card-interactive:hover {
+    box-shadow: var(--sp-shadow-md);
+    border-color: var(--sp-brand-200);
+  }
+
+  /* -------------------------------------------------------------- buttons */
+  .sp-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: var(--sp-control-h);
+    padding-inline: var(--sp-control-px);
+    border-radius: var(--sp-radius-md);
+    font-weight: 600;
+    font-size: var(--sp-text-sm);
+    line-height: 1;
+    white-space: nowrap;
+    transition: background-color var(--sp-transition),
+      border-color var(--sp-transition), color var(--sp-transition),
+      box-shadow var(--sp-transition);
+  }
+  .sp-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--sp-ring);
+  }
+  .sp-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .sp-btn-primary {
+    background: var(--sp-brand-600);
+    color: #fff;
+  }
+  .sp-btn-primary:hover:not(:disabled) {
+    background: var(--sp-brand-700);
+  }
+
+  .sp-btn-secondary {
+    background: var(--sp-surface);
+    color: var(--sp-ink-700);
+    border: 1px solid var(--sp-border-strong);
+  }
+  .sp-btn-secondary:hover:not(:disabled) {
+    background: var(--sp-ink-50);
+    border-color: var(--sp-ink-300);
+  }
+
+  .sp-btn-ghost {
+    background: transparent;
+    color: var(--sp-ink-600);
+  }
+  .sp-btn-ghost:hover:not(:disabled) {
+    background: var(--sp-ink-100);
+  }
+
+  .sp-btn-danger {
+    background: var(--sp-surface);
+    color: var(--sp-danger-text);
+    border: 1px solid var(--sp-danger-border);
+  }
+  .sp-btn-danger:hover:not(:disabled) {
+    background: var(--sp-danger-surface);
+  }
+
+  .sp-btn-sm {
+    height: calc(var(--sp-control-h) - 0.5rem);
+    padding-inline: 0.75rem;
+    font-size: var(--sp-text-xs);
+    border-radius: var(--sp-radius-sm);
+  }
+  .sp-btn-block {
+    width: 100%;
+  }
+
+  /* Large single-action button used by the elderly pathway. */
+  .sp-btn-jumbo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: auto;
+    padding: 1.5rem 1rem;
+    border-radius: var(--sp-radius-xl);
+    border-width: 2px;
+    border-style: solid;
+    font-size: var(--sp-text-lg);
+    font-weight: 700;
+  }
+
+  /* --------------------------------------------------------------- forms */
+  .sp-field {
+    display: block;
+    font-size: var(--sp-text-sm);
+    font-weight: 500;
+    color: var(--sp-ink-700);
+    margin-bottom: 0.375rem;
+  }
+  .sp-input,
+  .sp-textarea {
+    width: 100%;
+    min-height: var(--sp-control-h);
+    padding: 0.5rem 0.875rem;
+    background: var(--sp-surface);
+    border: 1px solid var(--sp-border-strong);
+    border-radius: var(--sp-radius-md);
+    color: var(--sp-ink-900);
+    font-size: var(--sp-text-sm);
+    transition: border-color var(--sp-transition), box-shadow var(--sp-transition);
+  }
+  .sp-select {
+    width: 100%;
+    min-height: var(--sp-control-h);
+    padding: 0.5rem 2.5rem 0.5rem 0.875rem;
+    background: var(--sp-surface);
+    border: 1px solid var(--sp-border-strong);
+    border-radius: var(--sp-radius-md);
+    color: var(--sp-ink-900);
+    font-size: var(--sp-text-sm);
+    transition: border-color var(--sp-transition), box-shadow var(--sp-transition);
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1.25rem;
+  }
+  .sp-input::placeholder,
+  .sp-textarea::placeholder {
+    color: var(--sp-ink-400);
+  }
+  .sp-input:focus,
+  .sp-select:focus,
+  .sp-textarea:focus {
+    outline: none;
+    border-color: var(--sp-brand-500);
+    box-shadow: var(--sp-ring);
+  }
+  .sp-input-auto {
+    width: auto;
+  }
+
+  /* --------------------------------------------------------------- chips */
+  .sp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: var(--sp-radius-full);
+    font-size: var(--sp-text-xs);
+    font-weight: 600;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+  .sp-chip-neutral {
+    background: var(--sp-ink-100);
+    color: var(--sp-ink-700);
+  }
+  .sp-chip-ok {
+    background: var(--sp-ok-surface);
+    color: var(--sp-ok-text);
+  }
+  .sp-chip-warn {
+    background: var(--sp-warn-surface);
+    color: var(--sp-warn-text);
+  }
+  .sp-chip-danger {
+    background: var(--sp-danger-surface);
+    color: var(--sp-danger-text);
+  }
+  .sp-chip-info {
+    background: var(--sp-info-surface);
+    color: var(--sp-info-text);
+  }
+  .sp-chip-programme {
+    background: var(--sp-programme-surface);
+    color: var(--sp-programme-text);
+  }
+
+  /* ------------------------------------------------------------- notices */
+  .sp-notice {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-radius: var(--sp-radius-lg);
+    border: 1px solid;
+    font-size: var(--sp-text-sm);
+  }
+  .sp-notice-info {
+    background: var(--sp-info-surface);
+    border-color: var(--sp-info-border);
+    color: var(--sp-ink-800);
+  }
+  .sp-notice-ok {
+    background: var(--sp-ok-surface);
+    border-color: var(--sp-ok-border);
+    color: var(--sp-ok-text);
+  }
+  .sp-notice-warn {
+    background: var(--sp-warn-surface);
+    border-color: var(--sp-warn-border);
+    color: var(--sp-warn-text);
+  }
+  .sp-notice-danger {
+    background: var(--sp-danger-surface);
+    border-color: var(--sp-danger-border);
+    color: var(--sp-danger-text);
+  }
+
+  /* -------------------------------------------------------------- tables */
+  /* Tables scroll inside their own container so the page never scrolls
+     horizontally on mobile. */
+  .sp-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--sp-text-sm);
+  }
+  .sp-table thead th {
+    text-align: left;
+    font-weight: 500;
+    color: var(--sp-ink-500);
+    padding: 0.625rem 1rem;
+    border-bottom: 1px solid var(--sp-border);
+    white-space: nowrap;
+  }
+  .sp-table tbody td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--sp-ink-50);
+    color: var(--sp-ink-700);
+    vertical-align: middle;
+  }
+  .sp-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .sp-table tbody tr:hover {
+    background: var(--sp-ink-50);
+  }
+
+  /* ---------------------------------------------------------- navigation */
+  .sp-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border-radius: var(--sp-radius-md);
+    font-size: var(--sp-text-sm);
+    font-weight: 500;
+    color: var(--sp-ink-600);
+    transition: background-color var(--sp-transition), color var(--sp-transition);
+  }
+  .sp-nav-link:hover {
+    background: var(--sp-ink-100);
+    color: var(--sp-ink-900);
+  }
+  .sp-nav-link-active {
+    background: var(--sp-brand-600);
+    color: #fff;
+    box-shadow: var(--sp-shadow-xs);
+  }
+  .sp-nav-link-active:hover {
+    background: var(--sp-brand-700);
+    color: #fff;
+  }
+  .sp-nav-section {
+    padding: 1rem 0.75rem 0.375rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--sp-ink-400);
+  }
+
+  /* Mobile bottom tab bar. */
+  .sp-tabbar {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    align-items: stretch;
+    height: var(--sp-bottomnav-h);
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--sp-surface);
+    border-top: 1px solid var(--sp-border);
+  }
+  .sp-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--sp-ink-500);
+    transition: color var(--sp-transition);
+  }
+  .sp-tab-active {
+    color: var(--sp-brand-700);
+    font-weight: 600;
+  }
+
+  /* -------------------------------------------------------------- tokens */
+  .sp-icon-tile {
+    display: grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--sp-radius-md);
+    flex-shrink: 0;
+  }
+  .sp-avatar {
+    display: grid;
+    place-items: center;
+    border-radius: var(--sp-radius-full);
+    background: var(--sp-brand-100);
+    color: var(--sp-brand-800);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  /* --------------------------------------------------------------- misc */
+  .sp-skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--sp-ink-100) 25%,
+      var(--sp-ink-50) 50%,
+      var(--sp-ink-100) 75%
+    );
+    background-size: 200% 100%;
+    animation: sp-shimmer 1.4s ease-in-out infinite;
+    border-radius: var(--sp-radius-md);
+  }
+  @keyframes sp-shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  .sp-scroll-x {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+    scrollbar-width: thin;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Gradients.
+   Tailwind's gradient utilities cannot derive their transparent colour stop
+   from a CSS custom property, so brand gradients are declared here against the
+   tokens directly.
+   -------------------------------------------------------------------------- */
+@layer components {
+  .sp-gradient-brand {
+    background: linear-gradient(
+      135deg,
+      var(--sp-brand-600) 0%,
+      var(--sp-brand-800) 100%
+    );
+    color: #fff;
+  }
+  /* Headings default to ink-900 in the base layer, which is unreadable on the
+     brand gradient — override them here so no page needs a per-element fix. */
+  .sp-gradient-brand :is(h1, h2, h3, h4) {
+    color: #fff;
+  }
+  .sp-gradient-brand-soft {
+    background: linear-gradient(
+      135deg,
+      var(--sp-brand-50) 0%,
+      var(--sp-surface) 70%
+    );
+  }
+  .sp-gradient-maternal {
+    background: linear-gradient(
+      135deg,
+      var(--sp-maternal-surface) 0%,
+      var(--sp-surface) 75%
+    );
+    border-color: var(--sp-maternal-border);
+  }
+  .sp-gradient-programme {
+    background: linear-gradient(
+      135deg,
+      var(--sp-programme-surface) 0%,
+      var(--sp-surface) 75%
+    );
+    border-color: var(--sp-programme-border);
+  }
+  .sp-gradient-elderly {
+    background: linear-gradient(
+      135deg,
+      var(--sp-info-surface) 0%,
+      var(--sp-surface) 75%
+    );
+    border-color: var(--sp-info-border);
+  }
+}
