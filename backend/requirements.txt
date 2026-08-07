@@ -1,0 +1,44 @@
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- Data / ORM ---
+SQLAlchemy==2.0.36
+psycopg2-binary==2.9.10
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0
+
+# --- Auth ---
+PyJWT==2.10.1
+bcrypt==4.2.1
+
+# --- AI orchestration ---
+google-genai==0.3.0
+httpx==0.28.1
+
+# LangGraph drives the multi-step intake/navigation graph. Deterministic
+# clinical logic runs as plain nodes inside it, never as LLM-controlled steps.
+langgraph==0.2.60
+
+# google-genai requires websockets<15; langgraph pulls langsmith, which asks for
+# >=15 but only uses it for tracing (unused here). 14.2 keeps Gemini working.
+websockets==14.2
+
+# --- Knowledge retrieval (Qdrant + MiniLM ONNX embeddings) ---
+qdrant-client==1.12.1
+fastembed==0.4.2
+
+# --- Document intelligence (OCR) ---
+PyMuPDF==1.25.1
+pytesseract==0.3.13
+
+# --- Computer vision + numerics ---
+numpy==2.2.1
+
+# Pillow and onnxruntime are shared with fastembed (MiniLM embeddings), which
+# constrains both. Left as ranges so pip resolves one compatible set rather than
+# fighting a hard pin; the OCR and CV adapters work across these versions.
+Pillow>=10.3,<11
+onnxruntime>=1.17,<1.20
