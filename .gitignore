@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Environment
+.env
+.env.local
+
+# Runtime storage (uploads, generated heatmaps, local Qdrant index)
+backend/storage/documents/*
+backend/storage/images/*
+backend/storage/heatmaps/*
+backend/storage/qdrant/
+!backend/storage/**/.gitkeep
+
+# Trained CV weights are large and licensed separately
+models/**/*.onnx
+models/**/*.pt
+models/**/*.pth
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp
+.claude/
