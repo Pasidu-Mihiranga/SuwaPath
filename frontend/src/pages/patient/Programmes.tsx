@@ -1,0 +1,448 @@
+import { useEffect, useState } from "react";
+import {
+  Card,
+  Empty,
+  Icon,
+  type IconName,
+  ErrorNote,
+  EscalationBanner,
+  Spinner,
+  formatDate,
+} from "../../components/ui";
+import { api, errorMessage } from "../../lib/api";
+
+export default function Programmes() {
+  const [enrollments, setEnrollments] = useState<any[]>([]);
+  const [maternal, setMaternal] = useState<any>(null);
+  const [elderly, setElderly] = useState<any>(null);
+  const [medications, setMedications] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    const [enrolled, meds] = await Promise.all([
+      api.get("/care/enrollments"),
+      api.get("/care/medications").catch(() => ({ data: [] })),
+    ]);
+    setEnrollments(enrolled.data);
+    setMedications(meds.data);
+
+    await Promise.all([
+      api.get("/care/maternal").then((r) => setMaternal(r.data)).catch(() => undefined),
+      api.get("/care/elderly").then((r) => setElderly(r.data)).catch(() => undefined),
+    ]);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  if (loading) return <Spinner />;
+
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-bold text-ink-900">Care Programmes</h1>
+        <p className="text-ink-500">
+          Continuous support for pregnancy, elderly care and confidential health.
+        </p>
+      </header>
+
+      {enrollments.length === 0 && (
+        <Empty
+          title="You are not enrolled in a care programme"
+          hint="Maternal, postpartum and elderly pathways are available."
+        />
+      )}
+
+      {maternal && (
+        <MaternalPanel data={maternal} onCheckedIn={load} />
+      )}
+      {elderly && (
+        <ElderlyPanel
+          data={elderly}
+          medications={medications}
+          onChanged={load}
+        />
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------- Maternal */
+
+const MATERNAL_QUESTIONS = [
+  { code: "severe_headache", label: "Severe headache?" },
+  { code: "blurred_vision", label: "Blurred vision or seeing spots?" },
+  { code: "vaginal_bleeding", label: "Any bleeding?" },
+  { code: "severe_abdominal_pain", label: "Severe abdominal pain?" },
+  { code: "reduced_fetal_movement", label: "Reduced baby movement?" },
+  { code: "leaking_fluid", label: "Any fluid leaking?" },
+  { code: "swelling", label: "Sudden swelling of face or hands?" },
+  { code: "fever", label: "Fever?" },
+];
+
+const POSTPARTUM_QUESTIONS = [
+  { code: "severe_bleeding", label: "Heavy bleeding (soaking a pad in an hour)?" },
+  { code: "fever", label: "Fever or chills?" },
+  { code: "severe_headache", label: "Severe headache?" },
+  { code: "low_mood", label: "Feeling persistently low or unable to cope?" },
+  { code: "child_not_feeding", label: "Is the baby feeding poorly?" },
+];
+
+function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => void }) {
+  const [answers, setAnswers] = useState<Record<string, boolean>>({});
+  const [result, setResult] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const questions = data.is_postpartum ? POSTPARTUM_QUESTIONS : MATERNAL_QUESTIONS;
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      const { data: response } = await api.post("/care/check-ins", {
+        check_in_type: data.is_postpartum ? "postpartum" : "maternal",
+        wellbeing: Object.values(answers).some(Boolean) ? "not_great" : "good",
+        responses: answers,
+      });
+      setResult(response);
+      onCheckedIn();
+    } catch (err) {
+      setError(errorMessage(err, "Could not submit your check-in."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="sp-card sp-gradient-maternal p-5 sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-pink-800 font-semibold">
+              {data.is_postpartum ? "Postpartum & Newborn Care" : "Maternal Care"}
+            </p>
+            {!data.is_postpartum ? (
+              <>
+                <p className="text-3xl font-bold text-ink-900 mt-1">
+                  Week {data.pregnancy_week}
+                </p>
+                <p className="text-ink-600 text-sm">
+                  Expected delivery {formatDate(data.expected_delivery_date)}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-2xl font-bold text-ink-900 mt-1">
+                  {data.newborn?.name ?? "Newborn"}
+                </p>
+                <p className="text-ink-600 text-sm">
+                  Born {formatDate(data.newborn?.date_of_birth)} ·{" "}
+                  {data.newborn?.birth_weight_kg} kg
+                </p>
+              </>
+            )}
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {data.is_high_risk && (
+              <span className="sp-chip bg-orange-100 text-orange-800">High risk</span>
+            )}
+            {data.risk_conditions?.map((condition: string) => (
+              <span key={condition} className="sp-chip bg-purple-100 text-purple-800">
+                {condition}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {data.upcoming_milestone && (
+          <div className="mt-4 rounded-xl bg-white border border-pink-200 p-3">
+            <p className="text-xs text-ink-500">Upcoming</p>
+            <p className="font-semibold text-ink-900">
+              {data.upcoming_milestone.label}
+              {data.upcoming_milestone.week ? ` — week ${data.upcoming_milestone.week}` : ""}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {data.epds_score != null && (
+        <Card title="Mental wellbeing screening">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-ink-500">EPDS score</p>
+              <p className="text-2xl font-bold text-ink-900">{data.epds_score}</p>
+            </div>
+            <p className="text-sm text-ink-600 max-w-sm text-right">
+              {data.epds_interpretation}
+            </p>
+          </div>
+        </Card>
+      )}
+
+      <Card
+        title="Daily check-in"
+        subtitle="Tell us about any warning signs. This takes under a minute."
+      >
+        {result ? (
+          <div className="space-y-3">
+            <EscalationBanner
+              urgency={result.urgency}
+              message={result.escalation_message}
+            />
+            {!result.triggered_alert && (
+              <div className="rounded-xl bg-green-50 border border-green-200 p-4">
+                <p className="font-semibold text-green-900">Check-in recorded</p>
+                <p className="text-sm text-ink-700 mt-0.5">
+                  No danger signs reported. Keep monitoring how you feel.
+                </p>
+              </div>
+            )}
+            {result.guardian_alerts_raised > 0 && (
+              <p className="text-sm text-ink-600">
+                {result.guardian_alerts_raised} authorised family contact(s) were
+                notified.
+              </p>
+            )}
+            <button className="sp-btn sp-btn-secondary w-full" onClick={() => setResult(null)}>
+              Record another check-in
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="grid sm:grid-cols-2 gap-2.5">
+              {questions.map((question) => (
+                <label
+                  key={question.code}
+                  className={`flex items-center gap-3 rounded-xl border p-3.5 cursor-pointer transition ${
+                    answers[question.code]
+                      ? "border-red-300 bg-red-50"
+                      : "border-ink-200 hover:border-brand-400"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 accent-red-600"
+                    checked={Boolean(answers[question.code])}
+                    onChange={(event) =>
+                      setAnswers((previous) => ({
+                        ...previous,
+                        [question.code]: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-ink-800">{question.label}</span>
+                </label>
+              ))}
+            </div>
+            <ErrorNote message={error} />
+            <button
+              className="sp-btn sp-btn-primary w-full mt-4"
+              onClick={() => void submit()}
+              disabled={busy}
+            >
+              {busy ? "Submitting…" : "Submit check-in"}
+            </button>
+          </>
+        )}
+      </Card>
+
+      {data.blood_pressure?.length > 0 && (
+        <Card title="Blood pressure history">
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {data.blood_pressure.slice(0, 10).map((entry: any, index: number) => (
+              <div
+                key={index}
+                className={`shrink-0 rounded-xl border p-3 text-center min-w-[92px] ${
+                  entry.is_abnormal
+                    ? "border-orange-300 bg-orange-50"
+                    : "border-ink-200"
+                }`}
+              >
+                <p className="font-bold text-ink-900">
+                  {entry.systolic}/{entry.diastolic}
+                </p>
+                <p className="text-[11px] text-ink-500">
+                  {formatDate(entry.recorded_at)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- Elderly */
+
+function ElderlyPanel({
+  data,
+  medications,
+  onChanged,
+}: {
+  data: any;
+  medications: any[];
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function checkIn(wellbeing: string) {
+    setBusy(true);
+    try {
+      const { data: response } = await api.post("/care/check-ins", {
+        check_in_type: "elderly",
+        wellbeing,
+        responses: {},
+      });
+      setMessage(
+        wellbeing === "need_help"
+          ? "Your family contacts have been notified. Someone will check on you."
+          : "Thank you. Your check-in has been recorded.",
+      );
+      if (response.guardian_alerts_raised > 0) {
+        setMessage(
+          `Recorded. ${response.guardian_alerts_raised} family contact(s) notified.`,
+        );
+      }
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logDose(medicationId: string, status: string) {
+    setBusy(true);
+    try {
+      await api.post("/care/medications/log", {
+        medication_id: medicationId,
+        status,
+      });
+      setMessage(
+        status === "taken" ? "Marked as taken. Well done." : "Recorded.",
+      );
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Elderly pathway: large buttons, high contrast, minimum steps (spec §14).
+
+  return (
+    <div className="space-y-4">
+      <Card title="How are you feeling today?">
+        {message && (
+          <div className="rounded-xl bg-green-50 border border-green-200 p-4 mb-4">
+            <p className="text-ink-800">{message}</p>
+          </div>
+        )}
+        <div className="grid sm:grid-cols-3 gap-3">
+          {[
+            { key: "good", label: "GOOD", icon: "circleCheck" as IconName, tone: "bg-green-100 hover:bg-green-200 text-green-900 border-green-300" },
+            { key: "not_great", label: "NOT GREAT", icon: "warning" as IconName, tone: "bg-orange-100 hover:bg-orange-200 text-orange-900 border-orange-300" },
+            { key: "need_help", label: "NEED HELP", icon: "emergency" as IconName, tone: "bg-red-100 hover:bg-red-200 text-red-900 border-red-300" },
+          ].map((option) => (
+            <button
+              key={option.key}
+              onClick={() => void checkIn(option.key)}
+              disabled={busy}
+              className={`sp-btn sp-btn-jumbo ${option.tone}`}
+            >
+              <Icon name={option.icon} size={30} />
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {data.checked_in_today && (
+          <p className="text-sm text-ink-500 mt-3 text-center">
+            You already checked in today ({data.todays_wellbeing?.replace(/_/g, " ")}).
+          </p>
+        )}
+      </Card>
+
+      {medications.length > 0 && (
+        <Card title="Your medicines today">
+          <div className="space-y-3">
+            {medications.map((medication) => (
+              <div
+                key={medication.id}
+                className="rounded-2xl border border-ink-200 p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-ink-900 text-lg">
+                      {medication.name} {medication.dosage}
+                    </p>
+                    <p className="text-ink-600">{medication.frequency_label}</p>
+                  </div>
+                  {medication.consecutive_missed >= 2 && (
+                    <span className="sp-chip bg-red-100 text-red-800">
+                      {medication.consecutive_missed} doses missed
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {[
+                    { key: "taken", label: "TAKEN", tone: "bg-green-600 hover:bg-green-700 text-white" },
+                    { key: "skipped", label: "SKIPPED", tone: "bg-ink-200 hover:bg-ink-300 text-ink-800" },
+                    { key: "snoozed", label: "REMIND LATER", tone: "bg-orange-500 hover:bg-orange-600 text-white" },
+                  ].map((action) => (
+                    <button
+                      key={action.key}
+                      onClick={() => void logDose(medication.id, action.key)}
+                      disabled={busy}
+                      className={`rounded-xl font-bold py-3.5 text-sm transition ${action.tone}`}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+                {medication.adherence_percent_14d != null && (
+                  <p className="text-xs text-ink-500 mt-2">
+                    {medication.adherence_percent_14d}% taken over the last 14 days
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card title="Your care details">
+        <div className="grid sm:grid-cols-2 gap-4 text-sm">
+          <Detail label="Living situation" value={data.living_situation} />
+          <Detail label="Mobility" value={data.mobility_level} />
+          <Detail label="Fall risk" value={data.fall_risk_level} />
+          <Detail
+            label="Last check-in"
+            value={data.last_check_in_at ? formatDate(data.last_check_in_at) : "—"}
+          />
+        </div>
+        {data.consecutive_missed_checkins >= 2 && (
+          <div className="mt-4 rounded-xl bg-orange-50 border border-orange-200 p-3">
+            <p className="text-sm text-orange-900">
+              {data.consecutive_missed_checkins} check-ins missed. Your family
+              contacts may have been notified.
+            </p>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div>
+      <p className="text-xs text-ink-500">{label}</p>
+      <p className="font-medium text-ink-900 capitalize">
+        {value?.replace(/_/g, " ") ?? "—"}
+      </p>
+    </div>
+  );
+}
