@@ -192,7 +192,13 @@
     font-size: var(--sp-text-sm);
     transition: border-color var(--sp-transition), box-shadow var(--sp-transition);
   }
-  .sp-select {
+  /* `select.sp-input` is included deliberately. A native select renders with
+     the OS chevron and bevel, which looks nothing like the rest of the form,
+     and reaching for the familiar `sp-input` on a dropdown is the easy mistake
+     to make. Matching the element as well as the class means that mistake
+     produces the right control instead of an old-looking one. */
+  .sp-select,
+  select.sp-input {
     width: 100%;
     min-height: var(--sp-control-h);
     padding: 0.5rem 2.5rem 0.5rem 0.875rem;
