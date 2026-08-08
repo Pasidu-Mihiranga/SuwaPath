@@ -380,7 +380,7 @@ def seed_patients(
             else (rng.sample(CHRONIC_POOL, 1) if rng.random() < 0.15 else [])
         )
         is_pregnant = (
-            sex is Sex.FEMALE and 18 <= age <= 42 and rng.random() < 0.07
+            sex == Sex.FEMALE and 18 <= age <= 42 and rng.random() < 0.07
         )
 
         user = User(

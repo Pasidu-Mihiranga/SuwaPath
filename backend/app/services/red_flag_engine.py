@@ -143,7 +143,7 @@ def assess_concepts(concepts: set[str], context: Context) -> RedFlagResult:
     # Order rules strongest-first so the UI leads with the most serious finding.
     triggered.sort(key=lambda r: r.urgency.rank, reverse=True)
 
-    requires_emergency = urgency is UrgencyLevel.EMERGENCY or "emergency" in capabilities
+    requires_emergency = urgency == UrgencyLevel.EMERGENCY or "emergency" in capabilities
 
     return RedFlagResult(
         urgency=urgency,

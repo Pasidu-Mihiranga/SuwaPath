@@ -233,7 +233,7 @@ def create_staff_user(
     db.add(user)
     db.flush()
 
-    if payload.role is UserRole.DOCTOR:
+    if payload.role == UserRole.DOCTOR:
         if not payload.specialty_code:
             raise HTTPException(
                 status_code=400, detail="A doctor account requires a specialty."

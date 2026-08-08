@@ -534,7 +534,7 @@ def summarise(result: ExtractionResult) -> dict:
         v for v in result.values
         if v.flag in (ResultFlag.LOW, ResultFlag.HIGH, ResultFlag.CRITICAL)
     ]
-    normal_count = sum(1 for v in result.values if v.flag is ResultFlag.NORMAL)
+    normal_count = sum(1 for v in result.values if v.flag == ResultFlag.NORMAL)
 
     key_findings = [
         {
@@ -611,8 +611,8 @@ def _build_explanation(
     for value in abnormal[:3]:
         analyte = ANALYTE_LOOKUP.get(value.normalised_name or "")
         plain = analyte.plain_name if analyte else value.test_name
-        direction = "below" if value.flag is ResultFlag.LOW else "above"
-        if value.flag is ResultFlag.CRITICAL:
+        direction = "below" if value.flag == ResultFlag.LOW else "above"
+        if value.flag == ResultFlag.CRITICAL:
             direction = "well outside"
         sentences.append(
             f"Your {plain} is {value.result_text}, which is {direction} the "
@@ -639,7 +639,7 @@ def _suggest_specialty(abnormal: list[ParsedValue]) -> str:
         analyte = ANALYTE_LOOKUP.get(value.normalised_name or "")
         if not analyte:
             continue
-        weight = 2.0 if value.flag is ResultFlag.CRITICAL else 1.0
+        weight = 2.0 if value.flag == ResultFlag.CRITICAL else 1.0
         scores[analyte.specialty] = scores.get(analyte.specialty, 0.0) + weight
 
     if not scores:

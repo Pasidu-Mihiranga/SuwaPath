@@ -4,6 +4,7 @@ import { Spinner } from "./components/ui";
 import { HOME_BY_ROLE, useAuth, type Role } from "./lib/auth";
 
 import Confidential from "./pages/Confidential";
+import { Profile, Settings } from "./pages/Account";
 import Login from "./pages/Login";
 
 import PatientDashboard from "./pages/patient/Dashboard";
@@ -81,6 +82,8 @@ export default function App() {
         <Route path="/patient/history" element={<History />} />
         <Route path="/patient/sharing" element={<Sharing />} />
         <Route path="/patient/notifications" element={<Notifications />} />
+        <Route path="/patient/profile" element={<Profile />} />
+        <Route path="/patient/settings" element={<Settings />} />
       </Route>
 
       {/* Guardian */}
@@ -89,6 +92,8 @@ export default function App() {
         <Route path="/guardian/dependents/:patientId" element={<DependentDetail />} />
         <Route path="/guardian/alerts" element={<Alerts />} />
         <Route path="/guardian/notifications" element={<Notifications />} />
+        <Route path="/guardian/profile" element={<Profile />} />
+        <Route path="/guardian/settings" element={<Settings />} />
       </Route>
 
       {/* Doctor */}
@@ -99,6 +104,8 @@ export default function App() {
         <Route path="/doctor/patients" element={<MyPatients />} />
         <Route path="/doctor/patients/:patientId" element={<PatientDetail />} />
         <Route path="/doctor/notifications" element={<Notifications />} />
+        <Route path="/doctor/profile" element={<Profile />} />
+        <Route path="/doctor/settings" element={<Settings />} />
       </Route>
 
       {/* Hospital administrator */}
@@ -109,6 +116,8 @@ export default function App() {
         <Route path="/hospital/capacity" element={<Capacity />} />
         <Route path="/hospital/providers" element={<Providers />} />
         <Route path="/hospital/notifications" element={<Notifications />} />
+        <Route path="/hospital/profile" element={<Profile />} />
+        <Route path="/hospital/settings" element={<Settings />} />
       </Route>
 
       {/* System administrator */}
@@ -120,6 +129,8 @@ export default function App() {
         <Route path="/admin/ai" element={<AdminAi />} />
         <Route path="/admin/audit" element={<AdminAudit />} />
         <Route path="/admin/notifications" element={<Notifications />} />
+        <Route path="/admin/profile" element={<Profile />} />
+        <Route path="/admin/settings" element={<Settings />} />
       </Route>
 
       <Route path="/" element={<RoleHome />} />

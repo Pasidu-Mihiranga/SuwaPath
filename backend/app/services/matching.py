@@ -74,7 +74,7 @@ class MatchCriteria:
     @property
     def requires_emergency(self) -> bool:
         return (
-            self.urgency is UrgencyLevel.EMERGENCY
+            self.urgency == UrgencyLevel.EMERGENCY
             or "emergency" in self.required_capabilities
         )
 
@@ -279,7 +279,7 @@ def _score_doctor(
         factors["language"] = WEIGHTS["language"] * 0.3
 
     # 7. Consultation mode
-    if criteria.preferred_visit_type is VisitType.TELECONSULTATION:
+    if criteria.preferred_visit_type == VisitType.TELECONSULTATION:
         if doctor.supports_teleconsultation:
             factors["consultation_mode"] = WEIGHTS["consultation_mode"]
             reasons.append("they offer teleconsultation")

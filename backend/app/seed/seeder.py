@@ -137,22 +137,22 @@ def make_name(sex: Sex, ethnicity: str | None = None) -> str:
 
     if ethnicity == "tamil":
         first = rng.choice(
-            ref.TAMIL_FEMALE_FIRST if sex is Sex.FEMALE else ref.TAMIL_MALE_FIRST
+            ref.TAMIL_FEMALE_FIRST if sex == Sex.FEMALE else ref.TAMIL_MALE_FIRST
         )
         return f"{first} {rng.choice(ref.TAMIL_SURNAMES)}"
     if ethnicity == "muslim":
         first = rng.choice(
-            ref.MUSLIM_FEMALE_FIRST if sex is Sex.FEMALE else ref.MUSLIM_MALE_FIRST
+            ref.MUSLIM_FEMALE_FIRST if sex == Sex.FEMALE else ref.MUSLIM_MALE_FIRST
         )
         return f"{first} {rng.choice(ref.MUSLIM_SURNAMES)}"
     if ethnicity == "burgher":
         first = rng.choice(
-            ref.SINHALA_FEMALE_FIRST if sex is Sex.FEMALE else ref.SINHALA_MALE_FIRST
+            ref.SINHALA_FEMALE_FIRST if sex == Sex.FEMALE else ref.SINHALA_MALE_FIRST
         )
         return f"{first} {rng.choice(ref.BURGHER_SURNAMES)}"
 
     first = rng.choice(
-        ref.SINHALA_FEMALE_FIRST if sex is Sex.FEMALE else ref.SINHALA_MALE_FIRST
+        ref.SINHALA_FEMALE_FIRST if sex == Sex.FEMALE else ref.SINHALA_MALE_FIRST
     )
     return f"{first} {rng.choice(ref.SINHALA_SURNAMES)}"
 
@@ -641,7 +641,7 @@ def seed_guardian_alerts(db: Session, demo: dict[str, User]) -> int:
                 category=NotificationCategory.GUARDIAN_ALERT,
                 priority=(
                     NotificationPriority.CRITICAL
-                    if alert.severity is AlertSeverity.CRITICAL
+                    if alert.severity == AlertSeverity.CRITICAL
                     else NotificationPriority.NORMAL
                 ),
                 title=alert.title,

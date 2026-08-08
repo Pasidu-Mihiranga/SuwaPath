@@ -454,7 +454,7 @@ _TRANSLATIONS: dict[str, dict[Language, str]] = {
 
 
 def _localise(text: str, language: Language) -> str:
-    if language is Language.EN:
+    if language == Language.EN:
         return text
     return _TRANSLATIONS.get(text, {}).get(language, text)
 

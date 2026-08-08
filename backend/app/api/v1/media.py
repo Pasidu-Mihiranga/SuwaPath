@@ -211,7 +211,7 @@ def upload_document(
     document.document_type = result.document_type
 
     # Feed the finding into shared care navigation (internal rule 5).
-    has_critical = any(v.flag is ResultFlag.CRITICAL for v in result.values)
+    has_critical = any(v.flag == ResultFlag.CRITICAL for v in result.values)
     urgency = UrgencyLevel.URGENT if has_critical else (
         UrgencyLevel.ROUTINE if summary["abnormal_count"] else UrgencyLevel.SELF_CARE
     )

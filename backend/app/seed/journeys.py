@@ -358,7 +358,7 @@ def _historical_outcome(
         risk += 0.02                             # Monday effect
     if start.hour <= 8:
         risk += 0.025                            # early clinics
-    if visit_type is VisitType.TELECONSULTATION:
+    if visit_type == VisitType.TELECONSULTATION:
         risk -= 0.03                             # easier to attend
 
     risk = max(0.01, min(0.80, risk))
@@ -478,7 +478,7 @@ def seed_referrals(
                 due_date=(created + timedelta(days=rng.randint(7, 45))).date(),
                 completed_at=(
                     created + timedelta(days=rng.randint(3, 30))
-                    if status is ReferralStatus.COMPLETED
+                    if status == ReferralStatus.COMPLETED
                     else None
                 ),
             )
@@ -738,7 +738,7 @@ def seed_medications(
                         status=status,
                         recorded_at=(
                             due_at + timedelta(minutes=rng.randint(1, 90))
-                            if status is not MedicationLogStatus.MISSED
+                            if status != MedicationLogStatus.MISSED
                             else None
                         ),
                     )
@@ -851,7 +851,7 @@ def seed_check_ins_and_vitals(
                     wellbeing=wellbeing,
                     responses=responses,
                     danger_signs_reported=danger,
-                    triggered_alert=bool(danger) or wellbeing is WellbeingStatus.NEED_HELP,
+                    triggered_alert=bool(danger) or wellbeing == WellbeingStatus.NEED_HELP,
                 )
             )
 

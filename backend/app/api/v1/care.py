@@ -97,7 +97,7 @@ def raise_guardian_alerts(
                 category=NotificationCategory.GUARDIAN_ALERT,
                 priority=(
                     NotificationPriority.CRITICAL
-                    if severity is AlertSeverity.CRITICAL
+                    if severity == AlertSeverity.CRITICAL
                     else NotificationPriority.HIGH
                 ),
                 title=title,
@@ -153,26 +153,29 @@ def enroll(
     if programme is None:
         raise HTTPException(status_code=404, detail="Care programme not found.")
 
-    existing = db.execute(
+    # Enrolment is idempotent and self-healing. If an active enrolment already
+    # exists we reuse it rather than returning 409, then fall through to the
+    # record-provisioning block below. That matters because an enrolment whose
+    # backing MaternalRecord/ElderlyRecord is missing would otherwise be
+    # permanently stuck: the dashboard 404s and re-enrolling is refused.
+    enrollment = db.execute(
         select(CareEnrollment).where(
             CareEnrollment.patient_user_id == current_user.id,
             CareEnrollment.programme_id == programme.id,
             CareEnrollment.status == str(EnrollmentStatus.ACTIVE),
         )
     ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(
-            status_code=409, detail="You are already enrolled in this programme."
-        )
 
-    enrollment = CareEnrollment(
-        patient_user_id=current_user.id,
-        programme_id=programme.id,
-        status=EnrollmentStatus.ACTIVE,
-        enrolled_at=datetime.now(timezone.utc),
-    )
-    db.add(enrollment)
-    db.flush()
+    already_enrolled = enrollment is not None
+    if enrollment is None:
+        enrollment = CareEnrollment(
+            patient_user_id=current_user.id,
+            programme_id=programme.id,
+            status=EnrollmentStatus.ACTIVE,
+            enrolled_at=datetime.now(timezone.utc),
+        )
+        db.add(enrollment)
+        db.flush()
 
     if programme.programme_type in (ProgrammeType.MATERNAL, ProgrammeType.POSTPARTUM):
         record = db.execute(
@@ -184,11 +187,15 @@ def enroll(
             record = MaternalRecord(patient_user_id=current_user.id)
             db.add(record)
         record.enrollment_id = enrollment.id
-        record.expected_delivery_date = payload.expected_delivery_date
-        record.last_menstrual_period = payload.last_menstrual_period
-        record.is_postpartum = programme.programme_type is ProgrammeType.POSTPARTUM
+        # Only overwrite dates the caller actually supplied, so a repeat call
+        # (or a self-heal) never blanks an existing due date.
+        if payload.expected_delivery_date is not None:
+            record.expected_delivery_date = payload.expected_delivery_date
+        if payload.last_menstrual_period is not None:
+            record.last_menstrual_period = payload.last_menstrual_period
+        record.is_postpartum = programme.programme_type == ProgrammeType.POSTPARTUM
 
-    elif programme.programme_type is ProgrammeType.ELDERLY:
+    elif programme.programme_type == ProgrammeType.ELDERLY:
         record = db.execute(
             select(ElderlyRecord).where(ElderlyRecord.patient_user_id == current_user.id)
         ).scalar_one_or_none()
@@ -400,7 +407,7 @@ def submit_check_in(
         ),
     )
 
-    needs_help = payload.wellbeing is WellbeingStatus.NEED_HELP
+    needs_help = payload.wellbeing == WellbeingStatus.NEED_HELP
     triggered = bool(assessment.triggered_rules) or needs_help
     escalation = assessment.escalation_message if assessment.triggered_rules else None
     if needs_help and not escalation:
@@ -424,7 +431,7 @@ def submit_check_in(
         db.add(check_in)
 
     # Reset the elderly missed-check-in counter on a successful submission.
-    if payload.check_in_type is CheckInType.ELDERLY:
+    if payload.check_in_type == CheckInType.ELDERLY:
         record = db.execute(
             select(ElderlyRecord).where(ElderlyRecord.patient_user_id == current_user.id)
         ).scalar_one_or_none()
@@ -438,10 +445,10 @@ def submit_check_in(
             Notification(
                 user_id=current_user.id,
                 category=NotificationCategory.EMERGENCY
-                if assessment.urgency is UrgencyLevel.EMERGENCY
+                if assessment.urgency == UrgencyLevel.EMERGENCY
                 else NotificationCategory.CARE_PROGRAMME,
                 priority=NotificationPriority.CRITICAL
-                if assessment.urgency is UrgencyLevel.EMERGENCY
+                if assessment.urgency == UrgencyLevel.EMERGENCY
                 else NotificationPriority.HIGH,
                 title="Warning sign reported",
                 body=escalation or "Please contact your care team.",
@@ -455,7 +462,7 @@ def submit_check_in(
             alert_type="danger_sign_reported",
             severity=(
                 AlertSeverity.CRITICAL
-                if assessment.urgency is UrgencyLevel.EMERGENCY
+                if assessment.urgency == UrgencyLevel.EMERGENCY
                 else AlertSeverity.ATTENTION
             ),
             title=f"{current_user.full_name} reported a warning sign",
@@ -634,7 +641,7 @@ def log_medication(
 
     log.status = payload.status
     log.recorded_at = now
-    if payload.status is MedicationLogStatus.SNOOZED:
+    if payload.status == MedicationLogStatus.SNOOZED:
         log.snoozed_until = now + timedelta(minutes=payload.snooze_minutes or 30)
 
     db.commit()

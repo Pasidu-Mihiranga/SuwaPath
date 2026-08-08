@@ -13,17 +13,20 @@ import { api, errorMessage } from "../../lib/api";
 
 export default function Programmes() {
   const [enrollments, setEnrollments] = useState<any[]>([]);
+  const [catalogue, setCatalogue] = useState<any[]>([]);
   const [maternal, setMaternal] = useState<any>(null);
   const [elderly, setElderly] = useState<any>(null);
   const [medications, setMedications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   async function load() {
-    const [enrolled, meds] = await Promise.all([
+    const [enrolled, available, meds] = await Promise.all([
       api.get("/care/enrollments"),
+      api.get("/care/programmes").catch(() => ({ data: [] })),
       api.get("/care/medications").catch(() => ({ data: [] })),
     ]);
     setEnrollments(enrolled.data);
+    setCatalogue(available.data);
     setMedications(meds.data);
 
     await Promise.all([
@@ -39,6 +42,7 @@ export default function Programmes() {
 
   if (loading) return <Spinner />;
 
+  const enrolledCodes = new Set(enrollments.map((e) => e.programme_code));
 
   return (
     <div className="space-y-6">
@@ -48,13 +52,6 @@ export default function Programmes() {
           Continuous support for pregnancy, elderly care and confidential health.
         </p>
       </header>
-
-      {enrollments.length === 0 && (
-        <Empty
-          title="You are not enrolled in a care programme"
-          hint="Maternal, postpartum and elderly pathways are available."
-        />
-      )}
 
       {maternal && (
         <MaternalPanel data={maternal} onCheckedIn={load} />
@@ -66,6 +63,214 @@ export default function Programmes() {
           onChanged={load}
         />
       )}
+
+      <ProgrammeCatalogue
+        catalogue={catalogue}
+        enrolledCodes={enrolledCodes}
+        onEnrolled={load}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- Enrolment */
+
+const PROGRAMME_STYLE: Record<string, { icon: IconName; accent: string }> = {
+  maternal: { icon: "pregnancy", accent: "sp-gradient-maternal" },
+  postpartum: { icon: "pregnancy", accent: "sp-gradient-maternal" },
+  elderly: { icon: "elderly", accent: "sp-gradient-elderly" },
+  sexual_health: { icon: "privacy", accent: "sp-gradient-programme" },
+};
+
+function ProgrammeCatalogue({
+  catalogue,
+  enrolledCodes,
+  onEnrolled,
+}: {
+  catalogue: any[];
+  enrolledCodes: Set<string>;
+  onEnrolled: () => void;
+}) {
+  const [joining, setJoining] = useState<any>(null);
+  if (catalogue.length === 0) return null;
+
+  const available = catalogue.filter((p) => !enrolledCodes.has(p.code));
+
+  return (
+    <>
+      <Card
+        title={enrolledCodes.size > 0 ? "Other programmes" : "Available programmes"}
+        subtitle="Join a pathway to get reminders, check-ins and continuous follow-up."
+      >
+        {available.length === 0 ? (
+          <Empty
+            title="You are enrolled in every available programme"
+            hint="Your active pathways are shown above."
+          />
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-3">
+            {available.map((programme) => {
+              const style =
+                PROGRAMME_STYLE[programme.programme_type] ?? {
+                  icon: "favorite" as IconName,
+                  accent: "",
+                };
+              // The confidential pathway is deliberately not joinable from an
+              // authenticated account — that would defeat its purpose. It is
+              // reached anonymously instead (spec §16).
+              const isConfidential = programme.programme_type === "sexual_health";
+              return (
+                <div
+                  key={programme.code}
+                  className={`rounded-xl border border-line p-4 ${style.accent}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="sp-icon-tile bg-surface text-brand-700">
+                      <Icon name={style.icon} size={20} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-ink-900">{programme.name}</p>
+                      <p className="text-sm text-ink-600 mt-0.5">
+                        {programme.description}
+                      </p>
+                    </div>
+                  </div>
+                  {isConfidential ? (
+                    <a href="/private" className="sp-btn sp-btn-secondary sp-btn-sm mt-3">
+                      <Icon name="privacy" size={15} />
+                      Continue privately
+                    </a>
+                  ) : (
+                    <button
+                      className="sp-btn sp-btn-primary sp-btn-sm mt-3"
+                      onClick={() => setJoining(programme)}
+                    >
+                      Join programme
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {joining && (
+        <EnrolDialog
+          programme={joining}
+          onClose={() => setJoining(null)}
+          onDone={() => {
+            setJoining(null);
+            onEnrolled();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function EnrolDialog({
+  programme,
+  onClose,
+  onDone,
+}: {
+  programme: any;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [edd, setEdd] = useState("");
+  const [lmp, setLmp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const needsDates = programme.programme_type === "maternal";
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post("/care/enrollments", {
+        programme_code: programme.code,
+        expected_delivery_date: needsDates && edd ? edd : undefined,
+        last_menstrual_period: needsDates && lmp ? lmp : undefined,
+      });
+      onDone();
+    } catch (err) {
+      setError(errorMessage(err, "Could not join this programme."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/50 p-4">
+      <div className="w-full max-w-md sp-card p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-ink-900">{programme.name}</h3>
+            <p className="text-sm text-ink-500 mt-0.5">{programme.description}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="sp-btn sp-btn-ghost sp-btn-sm !px-2"
+            aria-label="Close"
+          >
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+
+        {needsDates && (
+          <div className="mt-4 space-y-3">
+            <div>
+              <label className="sp-field" htmlFor="edd">
+                Expected delivery date
+              </label>
+              <input
+                id="edd"
+                type="date"
+                className="sp-input"
+                value={edd}
+                onChange={(event) => setEdd(event.target.value)}
+              />
+            </div>
+            <div>
+              <label className="sp-field" htmlFor="lmp">
+                First day of last period (optional)
+              </label>
+              <input
+                id="lmp"
+                type="date"
+                className="sp-input"
+                value={lmp}
+                onChange={(event) => setLmp(event.target.value)}
+              />
+            </div>
+            <p className="text-xs text-ink-500">
+              Used to calculate your pregnancy week and schedule antenatal
+              reminders. You can change it later.
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-4">
+            <ErrorNote message={error} />
+          </div>
+        )}
+
+        <div className="mt-5 flex gap-2">
+          <button className="sp-btn sp-btn-secondary flex-1" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="sp-btn sp-btn-primary flex-1"
+            onClick={() => void submit()}
+            disabled={busy || (needsDates && !edd)}
+          >
+            {busy ? "Joining…" : "Confirm"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

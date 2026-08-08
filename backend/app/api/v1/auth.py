@@ -193,7 +193,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenRe
     db.add(user)
     db.flush()
 
-    if payload.role is UserRole.PATIENT:
+    if payload.role == UserRole.PATIENT:
         db.add(
             PatientProfile(
                 user_id=user.id,

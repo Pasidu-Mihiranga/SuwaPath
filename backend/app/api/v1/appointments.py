@@ -196,7 +196,7 @@ def book(
         raise HTTPException(
             status_code=409, detail="That slot has just been taken. Choose another time."
         )
-    if payload.visit_type is VisitType.TELECONSULTATION and not doctor.supports_teleconsultation:
+    if payload.visit_type == VisitType.TELECONSULTATION and not doctor.supports_teleconsultation:
         raise HTTPException(
             status_code=409, detail="This doctor does not offer teleconsultation."
         )
@@ -237,7 +237,7 @@ def book(
         ),
         fee_lkr=(
             doctor.teleconsultation_fee_lkr
-            if payload.visit_type is VisitType.TELECONSULTATION
+            if payload.visit_type == VisitType.TELECONSULTATION
             else doctor.consultation_fee_lkr
         ),
         booked_at=now,
@@ -245,7 +245,7 @@ def book(
         patient_distance_km=distance,
         teleconsultation_url=(
             f"https://meet.suwapath.lk/consult/{doctor.id[:8]}"
-            if payload.visit_type is VisitType.TELECONSULTATION
+            if payload.visit_type == VisitType.TELECONSULTATION
             else None
         ),
     )
@@ -452,15 +452,15 @@ def update_status(
 
     now = datetime.now(timezone.utc)
     appointment.status = payload.status
-    if payload.status is AppointmentStatus.CONFIRMED:
+    if payload.status == AppointmentStatus.CONFIRMED:
         appointment.confirmed_at = now
-    elif payload.status is AppointmentStatus.CHECKED_IN:
+    elif payload.status == AppointmentStatus.CHECKED_IN:
         appointment.checked_in_at = now
-    elif payload.status is AppointmentStatus.IN_CONSULTATION:
+    elif payload.status == AppointmentStatus.IN_CONSULTATION:
         appointment.started_at = now
-    elif payload.status is AppointmentStatus.COMPLETED:
+    elif payload.status == AppointmentStatus.COMPLETED:
         appointment.completed_at = now
-    elif payload.status is AppointmentStatus.CANCELLED:
+    elif payload.status == AppointmentStatus.CANCELLED:
         appointment.cancelled_at = now
         appointment.cancellation_reason = payload.reason
         db.add(

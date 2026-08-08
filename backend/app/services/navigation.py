@@ -137,7 +137,7 @@ def _score_specialties(
         scores[hint] = scores.get(hint, 0.0) + 4.0
 
     # An emergency always routes through emergency medicine as an option.
-    if red_flags.urgency is UrgencyLevel.EMERGENCY:
+    if red_flags.urgency == UrgencyLevel.EMERGENCY:
         scores["emergency_medicine"] = scores.get("emergency_medicine", 0.0) + 2.0
 
     return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
@@ -272,13 +272,13 @@ def _next_action(red_flags: RedFlagResult, specialty_code: str) -> str:
     spec = SPECIALTY_BY_CODE.get(specialty_code)
     specialty_name = spec.name if spec else specialty_code.replace("_", " ").title()
 
-    if red_flags.urgency is UrgencyLevel.EMERGENCY:
+    if red_flags.urgency == UrgencyLevel.EMERGENCY:
         return NEXT_ACTION_BY_URGENCY[UrgencyLevel.EMERGENCY]
-    if red_flags.urgency is UrgencyLevel.URGENT:
+    if red_flags.urgency == UrgencyLevel.URGENT:
         return (
             f"Book the earliest available {specialty_name} appointment — ideally "
             f"today or tomorrow."
         )
-    if red_flags.urgency is UrgencyLevel.ROUTINE:
+    if red_flags.urgency == UrgencyLevel.ROUTINE:
         return f"Book a consultation with a {specialty_name} specialist."
     return NEXT_ACTION_BY_URGENCY[UrgencyLevel.SELF_CARE]
