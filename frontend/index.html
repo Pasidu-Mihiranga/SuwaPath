@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0090b0" />
     <meta name="description" content="SuwaPath — AI patient navigation, clinical intake and hospital intelligence for Sri Lanka." />
+    <!-- Typography. Inter was previously declared in tokens.css but never
+         loaded, so the app silently rendered in the system UI font.
+         `display=swap` shows system text immediately and swaps when the
+         webfont arrives, so a slow connection never blanks the interface. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/brand/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />

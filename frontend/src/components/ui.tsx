@@ -126,7 +126,7 @@ export function Card({
                   space in a multi-column grid, and a truncated heading reads
                   worse than one that wraps to a second line. */}
               {title && (
-                <h2 className="font-semibold text-ink-900 text-base leading-snug">
+                <h2 className="sp-heading text-base">
                   {title}
                 </h2>
               )}
@@ -170,7 +170,9 @@ export function Stat({
   return (
     <div className="sp-card p-4">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm text-ink-500 leading-snug">{label}</p>
+        <p className="font-mono text-[0.6875rem] uppercase tracking-[0.12em] leading-snug text-ink-500">
+          {label}
+        </p>
         {icon && (
           <span className={`sp-icon-tile !h-8 !w-8 ${STAT_TONE[tone]}`}>
             <Icon name={icon} size={17} />
@@ -181,7 +183,7 @@ export function Stat({
           number, but a few (e.g. a specialty name) run long, and an
           unreadable "Endocr…" is worse than a tile that grows a line. */}
       <p
-        className="text-xl sm:text-2xl font-bold text-ink-900 mt-1.5 leading-tight break-words"
+        className="sp-display sp-numeric mt-1.5 break-words text-2xl sm:text-[1.75rem]"
         title={typeof value === "string" ? value : undefined}
       >
         {value}
@@ -364,8 +366,10 @@ export function PageHeader({
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
         {back}
-        <h1 className="text-xl sm:text-2xl font-bold text-ink-900">{title}</h1>
-        {subtitle && <p className="text-ink-500 mt-0.5 text-sm">{subtitle}</p>}
+        <h1 className="sp-display text-2xl sm:text-3xl">{title}</h1>
+        {subtitle && (
+          <p className="mt-1 text-sm text-ink-500">{subtitle}</p>
+        )}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </header>

@@ -75,6 +75,7 @@ const NODE_LABEL: Record<string, { label: string; icon: IconName }> = {
   web_agent: { label: "Current sources", icon: "search" },
   direct_agent: { label: "Assistant", icon: "chat" },
   merge: { label: "Combining answers", icon: "link" },
+  fulfil: { label: "Finding who can help", icon: "hospital" },
   judge: { label: "Answer safety review", icon: "verified" },
 };
 
@@ -95,6 +96,7 @@ const TOOL_LABEL: Record<string, string> = {
   knowledge: "Search health knowledge",
   recommendation: "Read recommendation",
   web_search: "Search reputable sources",
+  directory: "Search the provider directory",
 };
 
 const SUGGESTIONS = [
@@ -569,9 +571,7 @@ export default function Assistant() {
             <Icon name={railOpen ? "sidebarClose" : "sidebarOpen"} size={19} />
           </button>
           <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold leading-tight text-ink-900">
-              SuwaPath Assistant
-            </h1>
+            <h1 className="sp-heading truncate text-base">SuwaPath Assistant</h1>
             <p className="hidden truncate text-xs text-ink-500 sm:block">
               Symptoms, reports, appointments — all in one conversation.
             </p>

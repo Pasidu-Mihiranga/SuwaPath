@@ -43,6 +43,7 @@ export default {
       // Non-colour scales stay as plain custom properties — the
       // <alpha-value> form applies only to colours.
       fontFamily: {
+        display: ["var(--sp-font-display)"],
         sans: "var(--sp-font-sans)",
         mono: "var(--sp-font-mono)",
       },
