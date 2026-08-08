@@ -25,7 +25,7 @@ export function Brand({
       <img
         src="/brand/mark.png"
         alt="SuwaPath"
-        className={`h-9 w-9 object-contain ${className}`}
+        className={`h-11 w-11 object-contain ${className}`}
       />
     );
   }
@@ -33,7 +33,7 @@ export function Brand({
     <img
       src="/brand/logo.png"
       alt="SuwaPath — Your Health. Our Path."
-      className={`h-9 w-auto object-contain ${className}`}
+      className={`h-12 w-auto object-contain ${className}`}
     />
   );
 }

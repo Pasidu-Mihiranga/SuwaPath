@@ -59,6 +59,7 @@ function useProfileForm() {
           full_name: data.full_name ?? "",
           phone: data.phone ?? "",
           preferred_language: data.preferred_language ?? "en",
+          sex: p.sex ?? "",
           city: p.city ?? "",
           district: p.district ?? "",
           blood_group: p.blood_group ?? "",
@@ -86,12 +87,19 @@ function useProfileForm() {
       for (const key of keys) {
         const value = form[key];
         if (value === undefined) continue;
-        payload[key] =
+        if (
           key === "chronic_conditions" ||
           key === "allergies" ||
           key === "current_medications"
-            ? toList(String(value))
-            : value;
+        ) {
+          payload[key] = toList(String(value));
+        } else if (key === "sex") {
+          // "Prefer not to say" is the empty option; send null rather than ""
+          // so the enum validator does not reject it.
+          payload[key] = value === "" ? null : value;
+        } else {
+          payload[key] = value;
+        }
       }
       await api.patch("/auth/me", payload);
       await refreshUser();
@@ -106,11 +114,20 @@ function useProfileForm() {
   return { user, form, set, save, loading, saving, error, saved };
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
   return (
     <div>
       <label className="sp-field">{label}</label>
       {children}
+      {hint && <p className="mt-1 text-xs text-ink-500">{hint}</p>}
     </div>
   );
 }
@@ -232,6 +249,20 @@ export function Profile() {
             subtitle="Shown to clinicians in your pre-consultation summary."
           >
             <div className="grid sm:grid-cols-2 gap-4">
+              {/* Optional, and it stays optional. Leaving it unset is a real
+                  answer, not missing data — see lib/illustration.ts. */}
+              <Row label="Sex" hint="Optional. Used for clinical context and artwork.">
+                <select
+                  className="sp-input"
+                  value={form.sex}
+                  onChange={(event) => set("sex", event.target.value)}
+                >
+                  <option value="">Prefer not to say</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="other">Other</option>
+                </select>
+              </Row>
               <Row label="City">
                 <input
                   className="sp-input"
@@ -284,6 +315,7 @@ export function Profile() {
                 saved={saved}
                 onSave={() =>
                   save([
+                    "sex",
                     "city",
                     "blood_group",
                     "chronic_conditions",

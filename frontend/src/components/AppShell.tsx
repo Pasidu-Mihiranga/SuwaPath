@@ -96,6 +96,7 @@ export default function AppShell() {
   const [unread, setUnread] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     api
@@ -217,7 +218,11 @@ export default function AppShell() {
 
       {/* ------------------------------------------------------- main area */}
       <div className="flex-1 min-w-0 flex flex-col min-h-0">
-        <header className="sticky top-0 z-30 bg-surface/95 backdrop-blur border-b border-line">
+        {/* Translucent rather than near-opaque, so content scrolling beneath
+            reads through the bar instead of disappearing under a flat panel.
+            supports-[]: keeps it solid where backdrop-filter is unavailable —
+            otherwise the bar would go see-through with nothing blurring it. */}
+        <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/70">
           <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
             <button
               className="lg:hidden sp-btn sp-btn-ghost !px-2"
@@ -228,6 +233,36 @@ export default function AppShell() {
             <Link to={home} className="lg:hidden" aria-label="SuwaPath home">
               <Brand variant="mark" />
             </Link>
+
+            {user.role === "patient" && (
+              <form
+                role="search"
+                className="hidden md:flex items-center gap-2 flex-1 max-w-md"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const q = search.trim();
+                  navigate(
+                    q
+                      ? `/patient/find-care?q=${encodeURIComponent(q)}`
+                      : "/patient/find-care",
+                  );
+                }}
+              >
+                <div className="relative w-full">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
+                    <Icon name="search" size={17} />
+                  </span>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search doctors, hospitals, specialties…"
+                    aria-label="Search care providers"
+                    className="sp-input !h-9 !pl-9 bg-surface/80"
+                  />
+                </div>
+              </form>
+            )}
 
             <div className="ml-auto flex items-center gap-1 sm:gap-2">
               <Link

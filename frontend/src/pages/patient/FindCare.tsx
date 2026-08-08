@@ -22,6 +22,10 @@ const TABS: { key: Tab; label: string }[] = [
 export default function FindCare() {
   const [params] = useSearchParams();
   const recommendationId = params.get("recommendation") ?? undefined;
+  // Free text from the top bar. There is no server-side text search on
+  // /providers, so this narrows the matches already returned rather than
+  // pretending to search the whole directory.
+  const query = (params.get("q") ?? "").trim().toLowerCase();
 
   const [tab, setTab] = useState<Tab>("doctors");
   const [specialties, setSpecialties] = useState<any[]>([]);
@@ -61,6 +65,14 @@ export default function FindCare() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const visibleResults: any[] = !query
+    ? data?.results ?? []
+    : (data?.results ?? []).filter((item: any) =>
+        [item.name, item.specialty_name, item.hospital_name, item.city]
+          .filter(Boolean)
+          .some((field: string) => field.toLowerCase().includes(query)),
+      );
 
   return (
     <div className="space-y-5">
@@ -163,11 +175,18 @@ export default function FindCare() {
 
       {loading ? (
         <Spinner label="Matching providers…" />
-      ) : !data?.results?.length ? (
-        <Empty title="No matches found" hint="Try widening your filters." />
+      ) : !visibleResults.length ? (
+        <Empty
+          title="No matches found"
+          hint={
+            query
+              ? `Nothing here matches “${query}”. Try widening your filters.`
+              : "Try widening your filters."
+          }
+        />
       ) : (
         <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-          {data.results.map((item: any) =>
+          {visibleResults.map((item: any) =>
             tab === "doctors" ? (
               <DoctorCard
                 key={item.doctor_id}

@@ -260,6 +260,7 @@ class UpdateProfileRequest(BaseModel):
     full_name: str | None = None
     phone: str | None = None
     preferred_language: Language | None = None
+    sex: Sex | None = None
     city: str | None = None
     district: str | None = None
     latitude: float | None = None
@@ -299,7 +300,11 @@ def update_me(
             profile = PatientProfile(user_id=current_user.id)
             db.add(profile)
         for field, value in profile_fields.items():
-            if value is not None:
+            # `sex` is the one field a patient must be able to take back:
+            # choosing "prefer not to say" after having answered has to clear
+            # the stored value, not silently keep it. The payload used
+            # exclude_unset, so an explicit null here is a real instruction.
+            if value is not None or field == "sex":
                 setattr(profile, field, value)
 
     db.commit()

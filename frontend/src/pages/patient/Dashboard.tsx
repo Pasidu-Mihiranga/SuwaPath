@@ -279,9 +279,17 @@ export default function PatientDashboard() {
             </Link>
           }
         >
-          {data.care_programmes?.length ? (
-            <div className="grid sm:grid-cols-2 gap-3">
-              {data.care_programmes.map((programme: any) => (
+          {
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {!data.care_programmes?.length && (
+                <div className="sm:col-span-2">
+                  <Empty
+                    title="Not enrolled in a care programme"
+                    hint="Maternal and elderly pathways are available."
+                  />
+                </div>
+              )}
+              {data.care_programmes?.map((programme: any) => (
                 <Link
                   key={programme.id}
                   to="/patient/programmes"
@@ -297,10 +305,10 @@ export default function PatientDashboard() {
                       alt=""
                       aria-hidden="true"
                       loading="lazy"
-                      className="pointer-events-none absolute -bottom-3 -right-2 hidden w-24 select-none sm:block"
+                      className="pointer-events-none mx-auto mb-3 h-24 w-auto select-none object-contain"
                     />
                   )}
-                  <div className="relative sm:pr-24">
+                  <div className="relative">
                     <p className="font-semibold text-ink-900">{programme.name}</p>
                     {data.maternal_summary && programme.type === "maternal" && (
                       <p className="text-sm text-ink-600 mt-1">
@@ -319,13 +327,32 @@ export default function PatientDashboard() {
                   </div>
                 </Link>
               ))}
+
+              {/* Always offered, never "enrolled in": the confidential pathway
+                  is reached anonymously rather than from this account, so it
+                  is not part of care_programmes (spec §16). It carries a shield
+                  rather than artwork — a recognisable sexual-health image is
+                  exactly what someone glancing at a shared phone would notice. */}
+              <a
+                href="/private"
+                className="relative flex flex-col rounded-lg border p-4 transition hover:shadow-md sp-gradient-programme"
+              >
+                <span className="sp-icon-tile mb-3 bg-white/80 text-programme-text">
+                  <Icon name="privacy" size={22} />
+                </span>
+                <p className="font-semibold text-ink-900">
+                  Confidential Sexual Health Support
+                </p>
+                <p className="mt-1 text-sm text-ink-600">
+                  Private. Safe. Professional. We're here to help.
+                </p>
+                <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-programme-text">
+                  Continue privately
+                  <Icon name="arrowRight" size={16} />
+                </span>
+              </a>
             </div>
-          ) : (
-            <Empty
-              title="Not enrolled in a care programme"
-              hint="Maternal, elderly and confidential pathways are available."
-            />
-          )}
+          }
         </Card>
 
         {/* Activity */}
