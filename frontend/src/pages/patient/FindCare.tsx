@@ -394,7 +394,7 @@ function BookingModal({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/50 p-4">
-      <div className="w-full max-w-lg card p-6 max-h-[90vh] overflow-y-auto">
+      <div className="w-full max-w-lg sp-card p-6 max-h-[90vh] overflow-y-auto">
         {done ? (
           <div className="text-center py-4">
             <Icon name="circleCheck" size={48} className="mx-auto text-ok-text" />

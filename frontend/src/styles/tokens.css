@@ -10,80 +10,148 @@
    The brand ramp is sampled from the actual SuwaPath logo:
      mark gradient  #12cddb -> #0090b0
      wordmark navy  #0a2e56
+
+   COLOUR FORMAT — why every colour is defined twice
+   -------------------------------------------------
+   Each colour ships as a space-separated RGB triplet plus an rgb() wrapper:
+
+     --sp-ink-900-rgb: 10 46 86;
+     --sp-ink-900: rgb(var(--sp-ink-900-rgb));
+
+   The triplet is what makes Tailwind opacity modifiers work. Tailwind
+   rewrites `bg-ink-900/50` into `rgb(<colour> / 50%)`, which it can only do
+   when the colour is raw channels — given a plain `var(--sp-ink-900)` it
+   produces an invalid value and the element renders fully transparent
+   (this silently broke every modal backdrop once). tailwind.config.js
+   therefore maps colours to `rgb(var(--sp-…-rgb) / <alpha-value>)`.
+
+   The rgb() wrapper exists so components.css and any plain CSS can keep
+   using `var(--sp-ink-900)` directly without knowing about the triplet.
    ========================================================================== */
 
 :root {
   /* ---------------------------------------------------------------- brand */
-  --sp-brand-50: #ecfdff;
-  --sp-brand-100: #cef7fd;
-  --sp-brand-200: #a2eef9;
-  --sp-brand-300: #63e0f2;
-  --sp-brand-400: #1fcbe4;
-  --sp-brand-500: #00b0c0; /* logo mid stop */
-  --sp-brand-600: #0090b0; /* logo dark stop — primary action colour */
-  --sp-brand-700: #0a7490;
-  --sp-brand-800: #135e75;
-  --sp-brand-900: #164e63;
+  --sp-brand-50-rgb: 236 253 255;
+  --sp-brand-50: rgb(var(--sp-brand-50-rgb));
+  --sp-brand-100-rgb: 206 247 253;
+  --sp-brand-100: rgb(var(--sp-brand-100-rgb));
+  --sp-brand-200-rgb: 162 238 249;
+  --sp-brand-200: rgb(var(--sp-brand-200-rgb));
+  --sp-brand-300-rgb: 99 224 242;
+  --sp-brand-300: rgb(var(--sp-brand-300-rgb));
+  --sp-brand-400-rgb: 31 203 228;
+  --sp-brand-400: rgb(var(--sp-brand-400-rgb));
+  --sp-brand-500-rgb: 0 176 192; /* logo mid stop */
+  --sp-brand-500: rgb(var(--sp-brand-500-rgb));
+  --sp-brand-600-rgb: 0 144 176; /* logo dark stop — primary action colour */
+  --sp-brand-600: rgb(var(--sp-brand-600-rgb));
+  --sp-brand-700-rgb: 10 116 144;
+  --sp-brand-700: rgb(var(--sp-brand-700-rgb));
+  --sp-brand-800-rgb: 19 94 117;
+  --sp-brand-800: rgb(var(--sp-brand-800-rgb));
+  --sp-brand-900-rgb: 22 78 99;
+  --sp-brand-900: rgb(var(--sp-brand-900-rgb));
 
   /* ----------------------------------------------------------------- ink */
   /* Navy scale for text and neutral surfaces; 900 is the wordmark navy. */
-  --sp-ink-50: #f2f6fb;
-  --sp-ink-100: #e3ebf5;
-  --sp-ink-200: #c7d7ea;
-  --sp-ink-300: #9db8d6;
-  --sp-ink-400: #6c93bd;
-  --sp-ink-500: #4a75a3;
-  --sp-ink-600: #385d88;
-  --sp-ink-700: #2e4b6e;
-  --sp-ink-800: #1c3b60;
-  --sp-ink-900: #0a2e56;
+  --sp-ink-50-rgb: 242 246 251;
+  --sp-ink-50: rgb(var(--sp-ink-50-rgb));
+  --sp-ink-100-rgb: 227 235 245;
+  --sp-ink-100: rgb(var(--sp-ink-100-rgb));
+  --sp-ink-200-rgb: 199 215 234;
+  --sp-ink-200: rgb(var(--sp-ink-200-rgb));
+  --sp-ink-300-rgb: 157 184 214;
+  --sp-ink-300: rgb(var(--sp-ink-300-rgb));
+  --sp-ink-400-rgb: 108 147 189;
+  --sp-ink-400: rgb(var(--sp-ink-400-rgb));
+  --sp-ink-500-rgb: 74 117 163;
+  --sp-ink-500: rgb(var(--sp-ink-500-rgb));
+  --sp-ink-600-rgb: 56 93 136;
+  --sp-ink-600: rgb(var(--sp-ink-600-rgb));
+  --sp-ink-700-rgb: 46 75 110;
+  --sp-ink-700: rgb(var(--sp-ink-700-rgb));
+  --sp-ink-800-rgb: 28 59 96;
+  --sp-ink-800: rgb(var(--sp-ink-800-rgb));
+  --sp-ink-900-rgb: 10 46 86;
+  --sp-ink-900: rgb(var(--sp-ink-900-rgb));
 
   /* -------------------------------------------------------------- status */
   /* Clinical status language (spec §28). Each has a surface, border and text
      tone so states are styled consistently everywhere they appear. */
-  --sp-ok-surface: #ecfdf3;
-  --sp-ok-border: #a6f4c5;
-  --sp-ok-text: #05603a;
+  --sp-ok-surface-rgb: 236 253 243;
+  --sp-ok-surface: rgb(var(--sp-ok-surface-rgb));
+  --sp-ok-border-rgb: 166 244 197;
+  --sp-ok-border: rgb(var(--sp-ok-border-rgb));
+  --sp-ok-text-rgb: 5 96 58;
+  --sp-ok-text: rgb(var(--sp-ok-text-rgb));
 
-  --sp-warn-surface: #fff6ea;
-  --sp-warn-border: #fed7aa;
-  --sp-warn-text: #93370d;
+  --sp-warn-surface-rgb: 255 246 234;
+  --sp-warn-surface: rgb(var(--sp-warn-surface-rgb));
+  --sp-warn-border-rgb: 254 215 170;
+  --sp-warn-border: rgb(var(--sp-warn-border-rgb));
+  --sp-warn-text-rgb: 147 55 13;
+  --sp-warn-text: rgb(var(--sp-warn-text-rgb));
 
-  --sp-danger-surface: #fef3f2;
-  --sp-danger-border: #fecdca;
-  --sp-danger-text: #912018;
+  --sp-danger-surface-rgb: 254 243 242;
+  --sp-danger-surface: rgb(var(--sp-danger-surface-rgb));
+  --sp-danger-border-rgb: 254 205 202;
+  --sp-danger-border: rgb(var(--sp-danger-border-rgb));
+  --sp-danger-text-rgb: 145 32 24;
+  --sp-danger-text: rgb(var(--sp-danger-text-rgb));
 
-  --sp-programme-surface: #f6f4ff;
-  --sp-programme-border: #ddd6fe;
-  --sp-programme-text: #5b21b6;
+  --sp-programme-surface-rgb: 246 244 255;
+  --sp-programme-surface: rgb(var(--sp-programme-surface-rgb));
+  --sp-programme-border-rgb: 221 214 254;
+  --sp-programme-border: rgb(var(--sp-programme-border-rgb));
+  --sp-programme-text-rgb: 91 33 182;
+  --sp-programme-text: rgb(var(--sp-programme-text-rgb));
 
-  --sp-info-surface: var(--sp-brand-50);
-  --sp-info-border: var(--sp-brand-200);
-  --sp-info-text: var(--sp-brand-800);
+  --sp-info-surface-rgb: var(--sp-brand-50-rgb);
+  --sp-info-surface: rgb(var(--sp-info-surface-rgb));
+  --sp-info-border-rgb: var(--sp-brand-200-rgb);
+  --sp-info-border: rgb(var(--sp-info-border-rgb));
+  --sp-info-text-rgb: var(--sp-brand-800-rgb);
+  --sp-info-text: rgb(var(--sp-info-text-rgb));
 
   /* Maternal pathway accent (distinct from the generic programme purple). */
-  --sp-maternal-surface: #fff1f5;
-  --sp-maternal-border: #fbcfe8;
-  --sp-maternal-text: #9d174d;
+  --sp-maternal-surface-rgb: 255 241 245;
+  --sp-maternal-surface: rgb(var(--sp-maternal-surface-rgb));
+  --sp-maternal-border-rgb: 251 207 232;
+  --sp-maternal-border: rgb(var(--sp-maternal-border-rgb));
+  --sp-maternal-text-rgb: 157 23 77;
+  --sp-maternal-text: rgb(var(--sp-maternal-text-rgb));
 
   /* Solid action colours: for buttons that must read as a single strong
      colour rather than the tinted surface/border/text triads above — the
      elderly-pathway jumbo buttons (spec §14) are the main consumer. */
-  --sp-ok-solid: #16a34a;
-  --sp-ok-solid-hover: #15803d;
-  --sp-warn-solid: #ea580c;
-  --sp-warn-solid-hover: #c2410c;
-  --sp-danger-solid: #dc2626;
-  --sp-danger-solid-hover: #b91c1c;
-  --sp-programme-solid: #7c5cff;
-  --sp-programme-solid-hover: #6941c6;
+  --sp-ok-solid-rgb: 22 163 74;
+  --sp-ok-solid: rgb(var(--sp-ok-solid-rgb));
+  --sp-ok-solid-hover-rgb: 21 128 61;
+  --sp-ok-solid-hover: rgb(var(--sp-ok-solid-hover-rgb));
+  --sp-warn-solid-rgb: 234 88 12;
+  --sp-warn-solid: rgb(var(--sp-warn-solid-rgb));
+  --sp-warn-solid-hover-rgb: 194 65 12;
+  --sp-warn-solid-hover: rgb(var(--sp-warn-solid-hover-rgb));
+  --sp-danger-solid-rgb: 220 38 38;
+  --sp-danger-solid: rgb(var(--sp-danger-solid-rgb));
+  --sp-danger-solid-hover-rgb: 185 28 28;
+  --sp-danger-solid-hover: rgb(var(--sp-danger-solid-hover-rgb));
+  --sp-programme-solid-rgb: 124 92 255;
+  --sp-programme-solid: rgb(var(--sp-programme-solid-rgb));
+  --sp-programme-solid-hover-rgb: 105 65 198;
+  --sp-programme-solid-hover: rgb(var(--sp-programme-solid-hover-rgb));
 
   /* ------------------------------------------------------------ surfaces */
-  --sp-canvas: #f7f9fc;
-  --sp-surface: #ffffff;
-  --sp-surface-sunken: var(--sp-ink-50);
-  --sp-border: #e6ecf4;
-  --sp-border-strong: var(--sp-ink-200);
+  --sp-canvas-rgb: 247 249 252;
+  --sp-canvas: rgb(var(--sp-canvas-rgb));
+  --sp-surface-rgb: 255 255 255;
+  --sp-surface: rgb(var(--sp-surface-rgb));
+  --sp-surface-sunken-rgb: var(--sp-ink-50-rgb);
+  --sp-surface-sunken: rgb(var(--sp-surface-sunken-rgb));
+  --sp-border-rgb: 230 236 244;
+  --sp-border: rgb(var(--sp-border-rgb));
+  --sp-border-strong-rgb: var(--sp-ink-200-rgb);
+  --sp-border-strong: rgb(var(--sp-border-strong-rgb));
 
   /* ---------------------------------------------------------- typography */
   --sp-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
