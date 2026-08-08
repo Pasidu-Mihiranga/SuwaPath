@@ -159,7 +159,10 @@ export default function AppShell() {
   return (
     <div className={`flex ${fullBleed ? "h-screen overflow-hidden" : "min-h-screen"}`}>
       {/* ------------------------------------------------ desktop sidebar */}
-      <aside className="hidden lg:flex w-sidebar shrink-0 flex-col border-r border-line bg-surface">
+      {/* Pinned to the viewport rather than scrolling away with the page: the
+          menu and the help number are meant to be reachable from anywhere in a
+          long dashboard, not just the top of it. */}
+      <aside className="hidden lg:flex w-sidebar shrink-0 flex-col border-r border-line bg-surface lg:sticky lg:top-0 lg:h-screen">
         <div className="p-4 border-b border-line">
           <Link to={home} aria-label="SuwaPath home">
             <Brand />
@@ -200,6 +203,21 @@ export default function AppShell() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-3">{menu}</div>
+            {/* The help number was desktop-only, which had it backwards: the
+                phone is the device someone actually calls from. */}
+            <div className="px-3 pb-3">
+              <div className="rounded-lg bg-ink-50 p-3.5">
+                <p className="text-sm font-semibold text-ink-800">Need help?</p>
+                <p className="text-xs text-ink-500 mt-0.5">Contact SuwaPath Care</p>
+                <a
+                  href="tel:0112123456"
+                  className="mt-1.5 inline-flex items-center gap-1.5 text-brand-700 font-bold"
+                >
+                  <Icon name="phone" size={15} />
+                  0112 123 456
+                </a>
+              </div>
+            </div>
             <div className="p-3 border-t border-line">
               <button
                 className="sp-btn sp-btn-danger sp-btn-block"

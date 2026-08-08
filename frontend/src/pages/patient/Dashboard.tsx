@@ -123,12 +123,14 @@ export default function PatientDashboard() {
   return (
     <div className="space-y-6">
       {/* Welcome + primary action */}
-      <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
-        {/* `self-start` is what kills the dead space: as a grid item this card
-            would otherwise stretch to match the taller recommendation card
-            beside it, and no amount of internal alignment fills height the
-            content does not have. Sized to its own content instead. */}
-        <div className="lg:col-span-2 lg:self-start sp-card sp-gradient-brand-soft p-5 sm:p-6 flex gap-3 sm:gap-4 overflow-hidden">
+      {/* Two independent columns rather than a row of grid cells. In a plain
+          grid every card in a row waits for the tallest one, which left a band
+          of empty space under the short hero next to the long recommendation.
+          As columns each side flows at its own pace and the cards below move
+          up into the space instead of starting beneath it. */}
+      <div className="grid lg:grid-cols-3 gap-4 lg:gap-6 items-start">
+        <div className="lg:col-span-2 space-y-4 lg:space-y-6">
+        <div className="sp-card sp-gradient-brand-soft p-5 sm:p-6 flex gap-3 sm:gap-4 overflow-hidden">
           <div className="flex-1 min-w-0">
             <h1 className="sp-display text-2xl sm:text-[1.75rem]">
               Welcome back, {user?.full_name.split(" ")[0]}
@@ -167,6 +169,104 @@ export default function PatientDashboard() {
           />
         </div>
 
+          {/* Appointments and reports sit inside the left column so they
+              rise into the space beside the recommendation card rather
+              than starting below it. */}
+          <div className="grid sm:grid-cols-2 gap-4 lg:gap-6">
+          {/* Appointments */}
+          <Card
+            title="Upcoming Appointments"
+            action={
+              <Link to="/patient/appointments" className="text-sm font-semibold text-brand-700 hover:underline">
+                View all
+              </Link>
+            }
+          >
+            {data.upcoming_appointments?.length ? (
+              <div className="space-y-3">
+                {data.upcoming_appointments.map((appointment: any) => (
+                  <div
+                    key={appointment.id}
+                    className="rounded-xl border border-ink-100 p-3.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="sp-chip bg-brand-100 text-brand-800">
+                        {appointment.visit_type === "teleconsultation"
+                          ? "Teleconsultation"
+                          : "In-person visit"}
+                      </span>
+                      <StatusChip value={appointment.status} />
+                    </div>
+                    <div className="mt-2.5 flex items-baseline justify-between gap-2">
+                      <p className="font-semibold text-ink-900">
+                        {relativeDay(appointment.scheduled_start)}
+                      </p>
+                      <p className="text-sm text-ink-600">
+                        {new Date(appointment.scheduled_start).toLocaleTimeString(
+                          "en-GB",
+                          { hour: "2-digit", minute: "2-digit" },
+                        )}
+                      </p>
+                    </div>
+                    <p className="text-sm text-ink-700 mt-1">
+                      {appointment.doctor_name}
+                    </p>
+                    <p className="text-xs text-ink-500">
+                      {appointment.specialty_name} · {appointment.hospital_name}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty title="No upcoming appointments" />
+            )}
+          </Card>
+
+          {/* Reports */}
+          <Card
+            title="Understand Your Medical Reports"
+            action={
+              <Link to="/patient/reports" className="text-sm font-semibold text-brand-700 hover:underline">
+                View all
+              </Link>
+            }
+          >
+            {data.recent_report ? (
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <span className="sp-icon-tile bg-brand-50 text-brand-700">
+                    <Icon name="description" size={20} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-medium text-ink-900 truncate">
+                      {data.recent_report.file_name}
+                    </p>
+                    <p className="text-xs text-ink-500">
+                      Uploaded {formatDateTime(data.recent_report.uploaded_at)}
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-ink-50 p-3">
+                  <p className="text-xs font-semibold text-ink-700">Summary</p>
+                  <p className="text-sm text-ink-600 mt-0.5">
+                    {data.recent_report.summary ?? "Processing…"}
+                  </p>
+                </div>
+                <Link to="/patient/reports" className="sp-btn sp-btn-secondary sp-btn-sm w-full">
+                  View explanation
+                </Link>
+              </div>
+            ) : (
+              <Empty
+                title="No reports yet"
+                hint="Upload a lab report to get a plain-language explanation."
+              />
+            )}
+          </Card>
+          </div>
+        </div>
+
+        <div className="space-y-4 lg:space-y-6">
         <Card
           title="Current Care Recommendation"
           action={
@@ -213,100 +313,6 @@ export default function PatientDashboard() {
             />
           )}
         </Card>
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
-        {/* Appointments */}
-        <Card
-          title="Upcoming Appointments"
-          action={
-            <Link to="/patient/appointments" className="text-sm font-semibold text-brand-700 hover:underline">
-              View all
-            </Link>
-          }
-        >
-          {data.upcoming_appointments?.length ? (
-            <div className="space-y-3">
-              {data.upcoming_appointments.map((appointment: any) => (
-                <div
-                  key={appointment.id}
-                  className="rounded-xl border border-ink-100 p-3.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="sp-chip bg-brand-100 text-brand-800">
-                      {appointment.visit_type === "teleconsultation"
-                        ? "Teleconsultation"
-                        : "In-person visit"}
-                    </span>
-                    <StatusChip value={appointment.status} />
-                  </div>
-                  <div className="mt-2.5 flex items-baseline justify-between gap-2">
-                    <p className="font-semibold text-ink-900">
-                      {relativeDay(appointment.scheduled_start)}
-                    </p>
-                    <p className="text-sm text-ink-600">
-                      {new Date(appointment.scheduled_start).toLocaleTimeString(
-                        "en-GB",
-                        { hour: "2-digit", minute: "2-digit" },
-                      )}
-                    </p>
-                  </div>
-                  <p className="text-sm text-ink-700 mt-1">
-                    {appointment.doctor_name}
-                  </p>
-                  <p className="text-xs text-ink-500">
-                    {appointment.specialty_name} · {appointment.hospital_name}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Empty title="No upcoming appointments" />
-          )}
-        </Card>
-
-        {/* Reports */}
-        <Card
-          title="Understand Your Medical Reports"
-          action={
-            <Link to="/patient/reports" className="text-sm font-semibold text-brand-700 hover:underline">
-              View all
-            </Link>
-          }
-        >
-          {data.recent_report ? (
-            <div className="space-y-3">
-              <div className="flex items-start gap-3">
-                <span className="sp-icon-tile bg-brand-50 text-brand-700">
-                  <Icon name="description" size={20} />
-                </span>
-                <div className="min-w-0">
-                  <p className="font-medium text-ink-900 truncate">
-                    {data.recent_report.file_name}
-                  </p>
-                  <p className="text-xs text-ink-500">
-                    Uploaded {formatDateTime(data.recent_report.uploaded_at)}
-                  </p>
-                </div>
-              </div>
-              <div className="rounded-xl bg-ink-50 p-3">
-                <p className="text-xs font-semibold text-ink-700">Summary</p>
-                <p className="text-sm text-ink-600 mt-0.5">
-                  {data.recent_report.summary ?? "Processing…"}
-                </p>
-              </div>
-              <Link to="/patient/reports" className="sp-btn sp-btn-secondary sp-btn-sm w-full">
-                View explanation
-              </Link>
-            </div>
-          ) : (
-            <Empty
-              title="No reports yet"
-              hint="Upload a lab report to get a plain-language explanation."
-            />
-          )}
-        </Card>
-
         {/* Screening */}
         <Card
           title="Image Screening"
@@ -340,6 +346,7 @@ export default function PatientDashboard() {
             <Empty title="No screenings yet" hint="Upload a supported medical image." />
           )}
         </Card>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
