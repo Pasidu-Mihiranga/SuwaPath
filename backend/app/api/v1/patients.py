@@ -156,6 +156,11 @@ def dashboard(
         "patient": {
             "name": current_user.full_name,
             "age": profile.age if profile else None,
+            # Used only to choose a decorative illustration that looks a
+            # little like the patient. Never leaves the response, never
+            # reaches a model — the PHI boundary has no `sex` field on any
+            # route that talks to one except the clinical allowlist.
+            "sex": str(profile.sex) if profile and profile.sex else None,
             "city": profile.city if profile else None,
             "preferred_language": str(current_user.preferred_language),
             "accessibility_large_text": (

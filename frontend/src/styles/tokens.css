@@ -77,31 +77,46 @@
 
   /* -------------------------------------------------------------- status */
   /* Clinical status language (spec §28). Each has a surface, border and text
-     tone so states are styled consistently everywhere they appear. */
+     tone so states are styled consistently everywhere they appear.
+
+     These were originally very dark and low-chroma — a "forest" green that
+     read grey, a warn brown that read as mud, a danger maroon that looked
+     historic rather than urgent. They have been lifted in chroma so a status
+     chip signals at a glance, and every pairing was re-checked against its
+     own surface rather than assumed:
+
+       ok      #027A48 on #ECFDF3   5.1:1
+       warn    #B54708 on #FFFAEB   5.2:1
+       danger  #B42318 on #FEF3F2   6.0:1
+       info    #135E75 on #ECFDFF   5.4:1
+       prog    #5B21B6 on #F5F3FF   8.1:1
+
+     All clear WCAG AA (4.5:1) with headroom. Lift any of them further and
+     that headroom is what you spend, so re-measure before changing one. */
   --sp-ok-surface-rgb: 236 253 243;
   --sp-ok-surface: rgb(var(--sp-ok-surface-rgb));
-  --sp-ok-border-rgb: 166 244 197;
+  --sp-ok-border-rgb: 108 233 166;
   --sp-ok-border: rgb(var(--sp-ok-border-rgb));
-  --sp-ok-text-rgb: 5 96 58;
+  --sp-ok-text-rgb: 2 122 72;
   --sp-ok-text: rgb(var(--sp-ok-text-rgb));
 
-  --sp-warn-surface-rgb: 255 246 234;
+  --sp-warn-surface-rgb: 255 250 235;
   --sp-warn-surface: rgb(var(--sp-warn-surface-rgb));
-  --sp-warn-border-rgb: 254 215 170;
+  --sp-warn-border-rgb: 254 223 137;
   --sp-warn-border: rgb(var(--sp-warn-border-rgb));
-  --sp-warn-text-rgb: 147 55 13;
+  --sp-warn-text-rgb: 181 71 8;
   --sp-warn-text: rgb(var(--sp-warn-text-rgb));
 
   --sp-danger-surface-rgb: 254 243 242;
   --sp-danger-surface: rgb(var(--sp-danger-surface-rgb));
-  --sp-danger-border-rgb: 254 205 202;
+  --sp-danger-border-rgb: 253 162 155;
   --sp-danger-border: rgb(var(--sp-danger-border-rgb));
-  --sp-danger-text-rgb: 145 32 24;
+  --sp-danger-text-rgb: 180 35 24;
   --sp-danger-text: rgb(var(--sp-danger-text-rgb));
 
-  --sp-programme-surface-rgb: 246 244 255;
+  --sp-programme-surface-rgb: 245 243 255;
   --sp-programme-surface: rgb(var(--sp-programme-surface-rgb));
-  --sp-programme-border-rgb: 221 214 254;
+  --sp-programme-border-rgb: 196 181 253;
   --sp-programme-border: rgb(var(--sp-programme-border-rgb));
   --sp-programme-text-rgb: 91 33 182;
   --sp-programme-text: rgb(var(--sp-programme-text-rgb));
