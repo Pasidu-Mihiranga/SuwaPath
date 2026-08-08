@@ -10,6 +10,7 @@ import {
   formatDate,
 } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
+import { programmeIllustration } from "../../lib/illustration";
 
 export default function Programmes() {
   const [enrollments, setEnrollments] = useState<any[]>([]);
@@ -122,9 +123,20 @@ function ProgrammeCatalogue({
               return (
                 <div
                   key={programme.code}
-                  className={`rounded-xl border border-line p-4 ${style.accent}`}
+                  className={`relative overflow-hidden rounded-xl border border-line p-4 ${style.accent}`}
                 >
-                  <div className="flex items-start gap-3">
+                  {/* Decorative. The confidential pathway returns none, which
+                      is the point — see lib/illustration.ts. */}
+                  {programmeIllustration(programme.programme_type) && (
+                    <img
+                      src={programmeIllustration(programme.programme_type)!}
+                      alt=""
+                      aria-hidden="true"
+                      loading="lazy"
+                      className="pointer-events-none absolute -bottom-2 -right-1 hidden w-20 select-none sm:block"
+                    />
+                  )}
+                  <div className="relative flex items-start gap-3 sm:pr-16">
                     <span className="sp-icon-tile bg-surface text-brand-700">
                       <Icon name={style.icon} size={20} />
                     </span>
@@ -136,13 +148,13 @@ function ProgrammeCatalogue({
                     </div>
                   </div>
                   {isConfidential ? (
-                    <a href="/private" className="sp-btn sp-btn-secondary sp-btn-sm mt-3">
+                    <a href="/private" className="sp-btn sp-btn-secondary sp-btn-sm mt-3 relative">
                       <Icon name="privacy" size={15} />
                       Continue privately
                     </a>
                   ) : (
                     <button
-                      className="sp-btn sp-btn-primary sp-btn-sm mt-3"
+                      className="sp-btn sp-btn-primary sp-btn-sm mt-3 relative"
                       onClick={() => setJoining(programme)}
                     >
                       Join programme
