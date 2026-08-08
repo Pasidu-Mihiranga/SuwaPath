@@ -428,7 +428,7 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
                 notified.
               </p>
             )}
-            <button className="sp-btn sp-btn-secondary w-full" onClick={() => setResult(null)}>
+            <button className="sp-btn sp-btn-secondary" onClick={() => setResult(null)}>
               Record another check-in
             </button>
           </div>
@@ -461,7 +461,7 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
             </div>
             <ErrorNote message={error} />
             <button
-              className="sp-btn sp-btn-primary w-full mt-4"
+              className="sp-btn sp-btn-primary mt-4"
               onClick={() => void submit()}
               disabled={busy}
             >

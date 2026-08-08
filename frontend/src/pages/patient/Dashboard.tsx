@@ -252,7 +252,7 @@ export default function PatientDashboard() {
                     {data.recent_report.summary ?? "Processing…"}
                   </p>
                 </div>
-                <Link to="/patient/reports" className="sp-btn sp-btn-secondary sp-btn-sm w-full">
+                <Link to="/patient/reports" className="sp-btn sp-btn-secondary sp-btn-sm">
                   View explanation
                 </Link>
               </div>

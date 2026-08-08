@@ -212,7 +212,7 @@ function ReportDetail({
             <Confidence value={document.recommendation.confidence} />
           </div>
           <button
-            className="sp-btn sp-btn-primary w-full mt-4"
+            className="sp-btn sp-btn-primary mt-4"
             onClick={() => onFindCare(document.recommendation.id)}
           >
             See matching doctors
@@ -377,7 +377,7 @@ export function Imaging() {
 
               {selected.recommendation && (
                 <button
-                  className="sp-btn sp-btn-primary w-full"
+                  className="sp-btn sp-btn-primary"
                   onClick={() =>
                     navigate(
                       `/patient/find-care?recommendation=${selected.recommendation.id}`,
