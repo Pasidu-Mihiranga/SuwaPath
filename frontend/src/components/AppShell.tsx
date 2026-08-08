@@ -121,6 +121,9 @@ export default function AppShell() {
   const tabs = items.filter((item) => item.tab).slice(0, 5);
   const sections = [...new Set(items.map((item) => item.section ?? ""))];
   const home = ROLE_HOME[user.role];
+  // Routes that manage their own viewport rather than sitting in the
+  // padded document column.
+  const fullBleed = location.pathname.endsWith("/assistant");
 
   const menu = (
     <nav className="flex flex-col gap-0.5" aria-label="Main">
@@ -153,7 +156,7 @@ export default function AppShell() {
   );
 
   return (
-    <div className="min-h-screen flex">
+    <div className={`flex ${fullBleed ? "h-screen overflow-hidden" : "min-h-screen"}`}>
       {/* ------------------------------------------------ desktop sidebar */}
       <aside className="hidden lg:flex w-sidebar shrink-0 flex-col border-r border-line bg-surface">
         <div className="p-4 border-b border-line">
@@ -213,7 +216,7 @@ export default function AppShell() {
       )}
 
       {/* ------------------------------------------------------- main area */}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col min-h-0">
         <header className="sticky top-0 z-30 bg-surface/95 backdrop-blur border-b border-line">
           <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
             <button
@@ -299,7 +302,17 @@ export default function AppShell() {
           </div>
         </header>
 
-        <main className="flex-1 p-3 sm:p-4 lg:p-8 pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto">
+        {/* Most pages are documents: padded, centred, scrolling as a page.
+            The assistant is an application surface — it owns the viewport,
+            manages its own scrolling, and would look wrong boxed inside a
+            centred column. `full-bleed` routes opt out of both. */}
+        <main
+          className={
+            fullBleed
+              ? "flex-1 min-h-0 w-full pb-[var(--sp-bottomnav-h)] lg:pb-0"
+              : "flex-1 p-3 sm:p-4 lg:p-8 pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
+          }
+        >
           <Outlet />
         </main>
       </div>

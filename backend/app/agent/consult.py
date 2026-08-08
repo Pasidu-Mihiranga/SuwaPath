@@ -178,6 +178,29 @@ class ConsultTurn:
 # --------------------------------------------------------------------------
 # State reconstruction
 # --------------------------------------------------------------------------
+# A bare "no" or "none" answers whatever was just asked. Without this the
+# slot detector saw no evidence, marked the topic unfilled, and the assistant
+# asked about fever and chills twice in a row.
+_BARE_NEGATIVE = re.compile(
+    r"^\s*(no|nope|none|nothing|not really|no it'?s not|negative|"
+    r"nah|no there'?s? (?:no|none)|i don'?t think so)\b[\s.!]*$", re.I)
+_BARE_AFFIRMATIVE = re.compile(r"^\s*(yes|yeah|yep|correct|that'?s right)\b[\s.!]*$", re.I)
+
+
+def _slot_of_question(question: str) -> str | None:
+    """Which history topic an assistant question was probing.
+
+    Matched against each slot's own detector vocabulary, so a model-phrased
+    question ("does light hurt your eyes?") still resolves to the slot it was
+    generated for.
+    """
+    text = (question or "").lower()
+    for slot in _SLOTS:
+        if slot.detector.search(text):
+            return slot.key
+    return None
+
+
 def build_state(messages: list[dict], *, memory_asked: list[str] | None = None) -> ConsultState:
     """Derive the consultation state from the conversation so far.
 
@@ -189,10 +212,20 @@ def build_state(messages: list[dict], *, memory_asked: list[str] | None = None) 
     assistant_turns = [m["content"] for m in messages if m.get("role") == "assistant"]
     transcript = "\n".join(patient_turns)
 
+    # What we have already asked is derived from the transcript, not from
+    # session memory. Memory evaporates on restart; the transcript does not,
+    # and a resumed conversation must not start re-asking questions the
+    # patient can plainly see it already asked.
+    asked = list(memory_asked or [])
+    for message in assistant_turns:
+        slot = _slot_of_question(message)
+        if slot and slot not in asked:
+            asked.append(slot)
+
     state = ConsultState(
         chief_complaint=patient_turns[0].strip() if patient_turns else "",
         transcript=transcript,
-        asked=list(memory_asked or []),
+        asked=asked,
         # Only assistant turns that actually ended in a question count.
         questions_asked=sum(1 for t in assistant_turns if t.rstrip().endswith("?")),
         impatient=bool(patient_turns and _IMPATIENT.search(patient_turns[-1])),
@@ -201,6 +234,23 @@ def build_state(messages: list[dict], *, memory_asked: list[str] | None = None) 
     for slot in _SLOTS:
         if slot.detector.search(transcript):
             state.filled.add(slot.key)
+
+    # A short answer counts as covering whatever was just asked, even when it
+    # contains none of the slot's keywords. "No" to "any fever or rash?" is a
+    # complete answer — and a clinically useful one, since it establishes
+    # negative findings.
+    for index, message in enumerate(messages):
+        if message.get("role") != "user" or index == 0:
+            continue
+        reply = message.get("content", "")
+        if not (_BARE_NEGATIVE.match(reply) or _BARE_AFFIRMATIVE.match(reply)):
+            continue
+        previous = messages[index - 1]
+        if previous.get("role") != "assistant":
+            continue
+        answered = _slot_of_question(previous.get("content", ""))
+        if answered:
+            state.filled.add(answered)
 
     return state
 

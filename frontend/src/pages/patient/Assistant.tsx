@@ -120,6 +120,8 @@ export default function Assistant() {
   const [booking, setBooking] = useState<ProviderCard | null>(null);
   const [uploading, setUploading] = useState(false);
   const [listening, setListening] = useState(false);
+  const [railOpen, setRailOpen] = useState(true);
+  const [attachMode, setAttachMode] = useState<AttachMode>("file");
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const listenerRef = useRef<voice.Listener | null>(null);
@@ -467,127 +469,163 @@ export default function Assistant() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="flex gap-4">
-        {/* ---------------- History sidebar ---------------- */}
-        <aside
-          className={`${
-            showHistory ? "block" : "hidden"
-          } lg:block w-full lg:w-64 shrink-0`}
-        >
-          <Card className="!p-3 lg:sticky lg:top-4">
+    <div className="flex h-full min-h-0">
+      {/* ---------------- History rail ----------------
+          Desktop: collapsible in place. Mobile: a slide-over, because a
+          permanently visible rail costs a third of a phone screen. */}
+      {showHistory && (
+        <div
+          className="fixed inset-0 z-30 bg-ink-900/40 lg:hidden"
+          onClick={() => setShowHistory(false)}
+          aria-hidden
+        />
+      )}
+      <aside
+        className={`
+          fixed inset-y-0 left-0 z-40 w-72 shrink-0 border-r border-line bg-surface
+          transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0
+          ${showHistory ? "translate-x-0" : "-translate-x-full"}
+          ${railOpen ? "lg:w-64" : "lg:w-0 lg:overflow-hidden lg:border-r-0"}
+        `}
+      >
+        <div className="flex h-full flex-col p-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => reset(false)}
-              className="sp-btn sp-btn-primary w-full justify-center"
+              className="sp-btn sp-btn-primary flex-1 justify-center"
             >
               <Icon name="add" size={16} />
               New chat
             </button>
             <button
-              onClick={() => setPinPrompt(true)}
-              className="sp-btn sp-btn-ghost w-full justify-center mt-2"
+              onClick={() => setShowHistory(false)}
+              aria-label="Close history"
+              className="sp-btn sp-btn-ghost !px-2 lg:hidden"
             >
-              <Icon name="lock" size={16} />
-              Private chat
-            </button>
-
-            <p className="mt-4 mb-1.5 px-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
-              Recent
-            </p>
-            <div className="space-y-0.5 max-h-[46vh] overflow-y-auto">
-              {sessions.length === 0 && (
-                <p className="px-1 py-2 text-sm text-ink-400">
-                  Your conversations will appear here.
-                </p>
-              )}
-              {sessions.map((session) => (
-                <div
-                  key={session.id}
-                  className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition ${
-                    session.id === sessionId
-                      ? "bg-brand-50 text-brand-800"
-                      : "hover:bg-canvas text-ink-700"
-                  }`}
-                >
-                  <button
-                    onClick={() => void openSession(session.id)}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <span className="block truncate">{session.title}</span>
-                    <span className="block text-xs text-ink-400">
-                      {relativeDay(session.last_message_at)}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => void deleteSession(session.id)}
-                    aria-label="Delete conversation"
-                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-ink-400 hover:text-danger-text transition"
-                  >
-                    <Icon name="delete" size={15} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </aside>
-
-        {/* ---------------- Conversation ---------------- */}
-        <div className="min-w-0 flex-1 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold text-ink-900 leading-snug">
-                SuwaPath Assistant
-              </h1>
-              <p className="text-sm text-ink-500">
-                Symptoms, reports, appointments — all in one conversation.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowHistory((v) => !v)}
-              className="sp-btn sp-btn-ghost lg:hidden shrink-0"
-            >
-              <Icon name="history" size={16} />
+              <Icon name="close" size={18} />
             </button>
           </div>
+          <button
+            onClick={() => setPinPrompt(true)}
+            className="sp-btn sp-btn-ghost mt-2 w-full justify-center"
+          >
+            <Icon name="lock" size={16} />
+            Private chat
+          </button>
 
-          {isPrivate && (
-            <div className="flex items-start gap-2.5 rounded-xl border border-programme-border bg-programme-surface px-3.5 py-2.5">
-              <Icon
-                name="lock"
-                size={17}
-                className="mt-0.5 shrink-0 text-programme-text"
-              />
-              <p className="text-sm text-programme-text">
-                <strong className="font-semibold">Private chat.</strong> Nothing
-                here is saved to your history, and only your PIN can reopen it.
-                It disappears after 12 hours.
+          <p className="mb-1.5 mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
+            Recent
+          </p>
+          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+            {sessions.length === 0 && (
+              <p className="px-1 py-2 text-sm text-ink-400">
+                Your conversations will appear here.
               </p>
-            </div>
+            )}
+            {sessions.map((session) => (
+              <div
+                key={session.id}
+                className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition ${
+                  session.id === sessionId
+                    ? "bg-brand-50 text-brand-800"
+                    : "text-ink-700 hover:bg-canvas"
+                }`}
+              >
+                <button
+                  onClick={() => void openSession(session.id)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <span className="block truncate">{session.title}</span>
+                  <span className="block text-xs text-ink-400">
+                    {relativeDay(session.last_message_at)}
+                  </span>
+                </button>
+                <button
+                  onClick={() => void deleteSession(session.id)}
+                  aria-label="Delete conversation"
+                  className="text-ink-400 opacity-0 transition hover:text-danger-text focus:opacity-100 group-hover:opacity-100"
+                >
+                  <Icon name="delete" size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
+
+      {/* ---------------- Conversation ---------------- */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-2 border-b border-line px-3 py-2.5 sm:px-4">
+          <button
+            onClick={() =>
+              window.innerWidth >= 1024
+                ? setRailOpen((v) => !v)
+                : setShowHistory(true)
+            }
+            aria-label={railOpen ? "Hide conversations" : "Show conversations"}
+            title={railOpen ? "Hide conversations" : "Show conversations"}
+            className="sp-btn sp-btn-ghost shrink-0 !px-2"
+          >
+            <Icon name={railOpen ? "sidebarClose" : "sidebarOpen"} size={19} />
+          </button>
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-semibold leading-tight text-ink-900">
+              SuwaPath Assistant
+            </h1>
+            <p className="hidden truncate text-xs text-ink-500 sm:block">
+              Symptoms, reports, appointments — all in one conversation.
+            </p>
+          </div>
+          {isPrivate && (
+            <span className="ml-auto flex shrink-0 items-center gap-1 rounded-full bg-programme-surface px-2.5 py-1 text-xs font-medium text-programme-text">
+              <Icon name="lock" size={13} />
+              Private
+            </span>
           )}
+        </div>
 
-          <Card className="!p-0 overflow-hidden">
-            <div className="h-[58vh] min-h-[380px] overflow-y-auto bg-canvas p-4 sm:p-5 space-y-4">
-              {turns.length === 0 && (
-                <Welcome name={user?.full_name} onPick={send} />
-              )}
+        {isPrivate && (
+          <div className="flex items-start gap-2.5 border-b border-programme-border bg-programme-surface px-4 py-2">
+            <Icon
+              name="lock"
+              size={15}
+              className="mt-0.5 shrink-0 text-programme-text"
+            />
+            <p className="text-xs text-programme-text">
+              Nothing here is saved to your history, and only your PIN can
+              reopen it. It disappears after 12 hours.
+            </p>
+          </div>
+        )}
 
-              {turns.map((turn, index) => (
-                <TurnBubble
-                  key={index}
-                  turn={turn}
-                  onPick={pickProvider}
-                  canSpeak={canSpeak}
-                  language={user?.preferred_language ?? "en"}
-                />
-              ))}
+        {/* The only scrolling region on the page. */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-canvas">
+          <div className="mx-auto w-full max-w-3xl space-y-4 px-3 py-5 sm:px-5">
+            {turns.length === 0 && (
+              <Welcome name={user?.full_name} onPick={send} />
+            )}
 
-              {trace.length > 0 && <Thinking items={trace} />}
-              {busy && trace.length === 0 && <Dots />}
-              <div ref={endRef} />
-            </div>
+            {turns.map((turn, index) => (
+              <TurnBubble
+                key={index}
+                turn={turn}
+                onPick={pickProvider}
+                canSpeak={canSpeak}
+                language={user?.preferred_language ?? "en"}
+              />
+            ))}
 
+            {trace.length > 0 && <Thinking items={trace} />}
+            {busy && trace.length === 0 && <Dots />}
+            <div ref={endRef} />
+          </div>
+        </div>
+
+        <div className="border-t border-line bg-surface px-3 py-3 sm:px-5">
+          <div className="mx-auto w-full max-w-3xl">
+            <ErrorNote message={error} />
             <form
-              className="flex gap-2 border-t border-line bg-surface p-3"
+              className="flex items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
                 void send(input);
@@ -596,27 +634,25 @@ export default function Assistant() {
               <input
                 ref={fileRef}
                 type="file"
-                accept="application/pdf,image/jpeg,image/png"
+                accept={acceptFor(attachMode)}
+                capture={attachMode === "camera" ? "environment" : undefined}
                 className="hidden"
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) void uploadFile(file);
                 }}
               />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
+              <AttachMenu
                 disabled={busy || uploading || isPrivate}
-                title={
-                  isPrivate
-                    ? "Uploads are turned off in a private chat"
-                    : "Attach a report or scan"
+                disabledReason={
+                  isPrivate ? "Uploads are off in a private chat" : undefined
                 }
-                aria-label="Attach a report or scan"
-                className="sp-btn sp-btn-ghost shrink-0 px-2.5"
-              >
-                <Icon name="upload" size={18} />
-              </button>
+                onPick={(mode) => {
+                  setAttachMode(mode);
+                  // Let `accept`/`capture` land before the picker opens.
+                  window.setTimeout(() => fileRef.current?.click(), 0);
+                }}
+              />
               {canListen && (
                 <button
                   type="button"
@@ -625,17 +661,17 @@ export default function Assistant() {
                   aria-label={listening ? "Stop dictating" : "Dictate a message"}
                   aria-pressed={listening}
                   title={listening ? "Stop dictating" : "Dictate a message"}
-                  className={`sp-btn shrink-0 px-2.5 ${
+                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border transition ${
                     listening
-                      ? "bg-danger-surface text-danger-text border-danger-border"
-                      : "sp-btn-ghost"
+                      ? "animate-pulse border-danger-border bg-danger-surface text-danger-text"
+                      : "border-line bg-surface text-ink-600 hover:border-brand-400 hover:text-brand-700"
                   }`}
                 >
                   <Icon name="mic" size={18} />
                 </button>
               )}
               <input
-                className="sp-input"
+                className="sp-input !rounded-full"
                 placeholder={
                   listening
                     ? "Listening…"
@@ -648,22 +684,19 @@ export default function Assistant() {
                 disabled={busy || uploading}
               />
               <button
-                className="sp-btn sp-btn-primary"
+                aria-label="Send"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-600 text-white transition hover:bg-brand-700 disabled:opacity-40"
                 disabled={busy || uploading || !input.trim()}
               >
-                <Icon name="send" size={18} />
-                <span className="hidden sm:inline">Send</span>
+                <Icon name="send" size={17} />
               </button>
             </form>
-          </Card>
-
-          <ErrorNote message={error} />
-
-          <p className="px-1 text-xs text-ink-400">
-            SuwaPath helps you navigate care. It does not diagnose or prescribe,
-            and urgency is always decided by the clinical rule engine — never by
-            a language model.
-          </p>
+            <p className="mt-2 text-center text-[11px] leading-snug text-ink-400">
+              SuwaPath helps you navigate care. It does not diagnose or
+              prescribe, and urgency is decided by the clinical rule engine —
+              never by a language model.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -855,6 +888,121 @@ function BookingSheet({
 }
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * Attachment picker.
+ *
+ * One `+` opening a small menu, rather than three buttons crowding the
+ * composer. The three modes differ only in what they hand the file input:
+ * `accept` narrows the picker, and `capture` asks a phone for the camera
+ * directly instead of the gallery.
+ */
+type AttachMode = "photo" | "camera" | "file";
+
+function acceptFor(mode: AttachMode): string {
+  if (mode === "photo" || mode === "camera") return "image/jpeg,image/png";
+  return "application/pdf,image/jpeg,image/png";
+}
+
+const ATTACH_OPTIONS: {
+  mode: AttachMode;
+  icon: IconName;
+  label: string;
+  hint: string;
+  mobileOnly?: boolean;
+}[] = [
+  {
+    mode: "camera",
+    icon: "camera",
+    label: "Take a photo",
+    hint: "Photograph a report or a rash",
+    mobileOnly: true,
+  },
+  { mode: "photo", icon: "image", label: "Photo library", hint: "A scan or a photo you already have" },
+  { mode: "file", icon: "description", label: "Upload a file", hint: "PDF lab report, or an image" },
+];
+
+function AttachMenu({
+  disabled,
+  disabledReason,
+  onPick,
+}: {
+  disabled: boolean;
+  disabledReason?: string;
+  onPick: (mode: AttachMode) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(event: MouseEvent) {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onEsc(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  // Camera capture is meaningless on a desktop without one, and the browser
+  // silently falls back to a file picker — so it is only offered on coarse
+  // pointers, where it actually opens a camera.
+  const isTouch =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(pointer: coarse)").matches;
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        aria-label={disabledReason ?? "Add an attachment"}
+        aria-expanded={open}
+        title={disabledReason ?? "Add an attachment"}
+        className="grid h-10 w-10 place-items-center rounded-full border border-line bg-surface text-ink-600 transition hover:border-brand-400 hover:text-brand-700 disabled:opacity-40"
+      >
+        <Icon name="add" size={19} />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-12 left-0 z-30 w-60 overflow-hidden rounded-2xl border border-line bg-surface shadow-lg"
+        >
+          {ATTACH_OPTIONS.filter((o) => !o.mobileOnly || isTouch).map((option) => (
+            <button
+              key={option.mode}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onPick(option.mode);
+              }}
+              className="flex w-full items-start gap-3 px-3 py-2.5 text-left transition hover:bg-canvas"
+            >
+              <span className="sp-icon-tile mt-0.5 shrink-0 bg-brand-50 text-brand-700">
+                <Icon name={option.icon} size={17} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink-900">
+                  {option.label}
+                </span>
+                <span className="block text-xs text-ink-500">{option.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Welcome({
   name,

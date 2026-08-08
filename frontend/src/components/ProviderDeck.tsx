@@ -73,7 +73,23 @@ const money = (value?: number) =>
 
 export default function ProviderDeck({ providers, onSelect, title }: Props) {
   const [active, setActive] = useState(0);
+  const [narrow, setNarrow] = useState(false);
   const deckRef = useRef<HTMLDivElement>(null);
+  const touchStart = useRef<number | null>(null);
+
+  // On a phone the fanned cards spill off both edges, so the deck collapses
+  // to a single card with the neighbours only just peeking. Measured from the
+  // container rather than a viewport breakpoint, because the same component
+  // renders inside a chat bubble whose width is not the viewport's.
+  useEffect(() => {
+    const element = deckRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) =>
+      setNarrow(entry.contentRect.width < 380),
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const count = providers.length;
   const clamp = useCallback(
@@ -116,7 +132,16 @@ export default function ProviderDeck({ providers, onSelect, title }: Props) {
         role="group"
         aria-label={title ?? "Suggestions"}
         onKeyDown={onKeyDown}
-        className="relative h-[15.5rem] outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded-xl"
+        onTouchStart={(event) => {
+          touchStart.current = event.touches[0].clientX;
+        }}
+        onTouchEnd={(event) => {
+          if (touchStart.current === null) return;
+          const delta = event.changedTouches[0].clientX - touchStart.current;
+          if (Math.abs(delta) > 40) go(delta < 0 ? 1 : -1);
+          touchStart.current = null;
+        }}
+        className="relative h-[15.5rem] touch-pan-y rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       >
         {providers.map((provider, index) => {
           const offset = index - active;
@@ -124,6 +149,8 @@ export default function ProviderDeck({ providers, onSelect, title }: Props) {
           // Cards more than two away are parked behind the deck rather than
           // unmounted, so flicking through does not remount and refetch.
           const hidden = distance > 2;
+          const spread = narrow ? 22 : 46;
+          const tilt = narrow ? 2 : 4;
 
           return (
             <button
@@ -132,9 +159,9 @@ export default function ProviderDeck({ providers, onSelect, title }: Props) {
               aria-hidden={hidden}
               tabIndex={offset === 0 ? 0 : -1}
               onClick={() => (offset === 0 ? onSelect?.(provider) : setActive(index))}
-              className="absolute left-1/2 top-0 w-[17.5rem] sm:w-[19rem] text-left transition-all duration-300 ease-out"
+              className="absolute left-1/2 top-0 w-[min(19rem,88%)] text-left transition-all duration-300 ease-out"
               style={{
-                transform: `translateX(-50%) translateX(${offset * 46}px) rotate(${offset * 4}deg) scale(${offset === 0 ? 1 : 0.9 - distance * 0.03})`,
+                transform: `translateX(-50%) translateX(${offset * spread}px) rotate(${offset * tilt}deg) scale(${offset === 0 ? 1 : 0.9 - distance * 0.03})`,
                 zIndex: 20 - distance,
                 opacity: hidden ? 0 : offset === 0 ? 1 : 0.55,
                 pointerEvents: hidden ? "none" : "auto",
