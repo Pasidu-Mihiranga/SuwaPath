@@ -15,7 +15,7 @@ import {
 } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
-import { patientIllustration } from "../../lib/illustration";
+import { patientIllustration, programmeIllustration } from "../../lib/illustration";
 
 const ACTIONS: {
   to: string;
@@ -69,7 +69,7 @@ export default function PatientDashboard() {
             alt=""
             aria-hidden="true"
             loading="lazy"
-            className="pointer-events-none absolute -bottom-4 -right-4 hidden w-40 select-none opacity-90 sm:block lg:w-48"
+            className="pointer-events-none absolute bottom-0 right-3 hidden max-h-[92%] w-40 select-none object-contain object-bottom sm:block lg:right-6 lg:w-48"
           />
           <div className="relative sm:max-w-[62%]">
             <h1 className="sp-display text-2xl sm:text-[1.75rem]">
@@ -285,25 +285,38 @@ export default function PatientDashboard() {
                 <Link
                   key={programme.id}
                   to="/patient/programmes"
-                  className={`rounded-lg border p-4 transition hover:shadow-md ${
+                  className={`relative overflow-hidden rounded-lg border p-4 transition hover:shadow-md ${
                     PROGRAMME_STYLE[programme.type] ?? "sp-gradient-elderly"
                   }`}
                 >
-                  <p className="font-semibold text-ink-900">{programme.name}</p>
-                  {data.maternal_summary && programme.type === "maternal" && (
-                    <p className="text-sm text-ink-600 mt-1">
-                      Pregnancy week {data.maternal_summary.pregnancy_week}
-                    </p>
-                  )}
-                  <div className="mt-3 h-1.5 rounded-full bg-white/70 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-brand-600"
-                      style={{ width: `${programme.progress_percent}%` }}
+                  {/* Decorative. Absent for the confidential programme by
+                      design — see lib/illustration.ts. */}
+                  {programmeIllustration(programme.type) && (
+                    <img
+                      src={programmeIllustration(programme.type)!}
+                      alt=""
+                      aria-hidden="true"
+                      loading="lazy"
+                      className="pointer-events-none absolute -bottom-3 -right-2 hidden w-24 select-none sm:block"
                     />
+                  )}
+                  <div className="relative sm:pr-24">
+                    <p className="font-semibold text-ink-900">{programme.name}</p>
+                    {data.maternal_summary && programme.type === "maternal" && (
+                      <p className="text-sm text-ink-600 mt-1">
+                        Pregnancy week {data.maternal_summary.pregnancy_week}
+                      </p>
+                    )}
+                    <div className="mt-3 h-1.5 rounded-full bg-white/70 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-brand-600"
+                        style={{ width: `${programme.progress_percent}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-ink-500 mt-1.5">
+                      {Math.round(programme.progress_percent)}% complete
+                    </p>
                   </div>
-                  <p className="text-xs text-ink-500 mt-1.5">
-                    {Math.round(programme.progress_percent)}% complete
-                  </p>
                 </Link>
               ))}
             </div>
