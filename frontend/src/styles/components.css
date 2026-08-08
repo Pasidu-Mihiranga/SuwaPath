@@ -13,6 +13,14 @@
     border: 1px solid var(--sp-border);
     border-radius: var(--sp-radius-lg);
     box-shadow: var(--sp-shadow-sm);
+    transition: box-shadow var(--sp-transition-lift),
+      border-color var(--sp-transition);
+  }
+  /* Opt-in on cards that are actually actionable. A card that lifts but
+     does nothing when clicked is a lie about affordance. */
+  .sp-card-interactive:hover {
+    box-shadow: var(--sp-shadow-md);
+    border-color: rgb(var(--sp-brand-300-rgb) / 0.7);
   }
   .sp-card-pad {
     padding: 1rem;
@@ -57,12 +65,24 @@
     cursor: not-allowed;
   }
 
+  /* The primary action carries the brand gradient and a brand-tinted
+     shadow, so it reads as the one thing on the screen worth pressing.
+     A flat fill with a grey shadow reads as a generic control. */
   .sp-btn-primary {
-    background: var(--sp-brand-600);
+    background: var(--sp-gradient-brand);
     color: #fff;
+    box-shadow: var(--sp-shadow-xs);
+    transition: box-shadow var(--sp-transition-lift),
+      transform var(--sp-transition-lift), filter var(--sp-transition);
   }
   .sp-btn-primary:hover:not(:disabled) {
-    background: var(--sp-brand-700);
+    box-shadow: var(--sp-shadow-brand);
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+  }
+  .sp-btn-primary:active:not(:disabled) {
+    transform: translateY(0) scale(0.985);
+    box-shadow: var(--sp-shadow-xs);
   }
 
   .sp-btn-secondary {
@@ -466,5 +486,100 @@
       var(--sp-surface) 75%
     );
     border-color: var(--sp-info-border);
+  }
+}
+
+/* ==========================================================================
+   Typography utilities
+   --------------------------------------------------------------------------
+   Added centrally so pages stop hand-rolling heading styles. Every heading in
+   the app should use `sp-display` or `sp-heading`; every clinical number
+   should use `sp-numeric`.
+   ========================================================================== */
+@layer components {
+  /* Page and hero titles. Inter Tight with optical tracking — at display
+     sizes the default letter-spacing looks loose. */
+  .sp-display {
+    font-family: var(--sp-font-display);
+    font-weight: 600;
+    letter-spacing: var(--sp-tracking-display);
+    line-height: var(--sp-leading-display);
+    color: var(--sp-ink-900);
+  }
+  .sp-heading {
+    font-family: var(--sp-font-display);
+    font-weight: 600;
+    letter-spacing: var(--sp-tracking-heading);
+    line-height: var(--sp-leading-heading);
+    color: var(--sp-ink-900);
+  }
+
+  /* Section label: a small mono pill with a brand dot. Gives a screen an
+     orienting rhythm without adding another heading level. */
+  .sp-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: var(--sp-radius-full);
+    border: 1px solid rgb(var(--sp-brand-600-rgb) / 0.25);
+    background: rgb(var(--sp-brand-600-rgb) / 0.06);
+    padding: 0.25rem 0.7rem;
+    font-family: var(--sp-font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: var(--sp-tracking-label);
+    color: var(--sp-brand-700);
+  }
+  .sp-label::before {
+    content: "";
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 999px;
+    background: var(--sp-brand-600);
+  }
+  /* Signals "this is live data". Paused for reduced-motion users below. */
+  .sp-label-live::before {
+    animation: sp-pulse 2.4s ease-in-out infinite;
+  }
+
+  /* Clinical numbers. Tabular figures keep decimal points aligned down a
+     column, which is the difference between scanning a lab panel and
+     re-reading it. */
+  .sp-numeric {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "cv05" 1;
+  }
+
+  /* Brand gradient as text, for the one word in a title worth emphasising. */
+  .sp-gradient-text {
+    background: var(--sp-gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Ambient dot texture for large empty surfaces. */
+  .sp-textured {
+    background-image: var(--sp-texture-dots);
+    background-size: var(--sp-texture-dots-size);
+  }
+}
+
+@keyframes sp-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(1.35); }
+}
+
+/* Motion is expressive, never required. Anyone who has asked their system to
+   reduce motion gets the same interface without the movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -770,6 +770,138 @@ def merge_node(state: AgentState) -> dict:
     }
 
 
+def fulfil_node(state: AgentState) -> dict:
+    """One bounded hop of agent-to-agent handoff.
+
+    Why this exists
+    ---------------
+    Fan-out alone is *parallel*, not *collaborative*: every agent is dispatched
+    from the same routing decision and none can see what another produced. That
+    is fine when the question genuinely has independent parts ("my appointment
+    AND my blood test"), and useless when one agent's output is what another
+    agent needs as *input*.
+
+    The concrete failure it fixes: a consultation ends by saying "see a
+    gastroenterologist, and an abdominal ultrasound would settle it" — and
+    stops there. The admin agent could have found that gastroenterologist and
+    priced that ultrasound, but it was never dispatched, because at routing
+    time nobody knew a gastroenterologist would be the answer. The patient
+    reads a recommendation they cannot act on.
+
+    So after merging, an agent may declare a *need* that another agent
+    satisfies, and that agent runs with the first one's conclusion as input.
+    This is real communication — B's query is derived from A's output — while
+    staying bounded in the ways that matter for a medical tool:
+
+    - **One hop only.** No loops, no negotiation, no emergent chatter. Latency
+      stays predictable and the trace stays readable.
+    - **Data, not prose.** The handoff carries a specialty code and a test
+      name, not free text for another model to reinterpret.
+    - **No new claims.** This node adds structured results to the reply; it
+      never rewrites the answer, so it cannot contradict the judge or the
+      red-flag engine.
+    """
+    started = time.perf_counter()
+    consult_state = state.get("consult") or {}
+
+    # Only a completed assessment declares a need. A follow-up question does
+    # not — offering doctors mid-history-taking pushes the patient to book
+    # before anyone knows what they need.
+    if consult_state.get("mode") not in ("assess", "escalate"):
+        return {}
+
+    specialty = consult_state.get("specialty")
+    if not specialty:
+        return {}
+
+    scope = state.get("scope") or {}
+    red_flags = state.get("red_flags") or {}
+    outputs = state.get("agent_outputs") or []
+
+    # Already answered by a parallel admin branch — nothing to add.
+    if any(o.get("route") == "admin" for o in outputs):
+        return {}
+
+    tests = []
+    for output in outputs:
+        if output.get("route") == "consult":
+            tests = (output.get("structured", {}).get("consult", {}) or {}).get("tests", [])
+            break
+
+    handoffs: list[dict] = []
+    structured: dict[str, Any] = {}
+
+    with agent_session() as db:
+        # Handoff 1 — the specialty the consultation landed on becomes the
+        # provider query. This is the input the router could not have known.
+        started_tool = time.perf_counter()
+        try:
+            _, payload = TOOLS["find_care"](
+                db, scope,
+                specialty_code=specialty,
+                capabilities=red_flags.get("required_capabilities") or [],
+            )
+            structured.update(payload)
+            handoffs.append({
+                "tool": "find_care",
+                "status": "ok",
+                "from": "consult",
+                "because": f"assessment recommended {specialty}",
+                "ms": int((time.perf_counter() - started_tool) * 1000),
+            })
+        except ToolDenied as exc:
+            handoffs.append({"tool": "find_care", "status": "denied", "detail": str(exc)})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Handoff find_care failed: %s", exc)
+            handoffs.append({"tool": "find_care", "status": "error"})
+
+        # Handoff 2 — the tests the assessment suggested become a directory
+        # lookup, so "an ultrasound would settle it" arrives with places and
+        # prices attached rather than as an instruction to go and find one.
+        if tests:
+            started_tool = time.perf_counter()
+            try:
+                names = ", ".join(str(t.get("name", "")) for t in tests[:3])
+                _, payload = TOOLS["directory"](db, scope, question=names)
+                existing = structured.get("providers") or []
+                structured["providers"] = existing + [
+                    p for p in payload.get("providers", []) if p.get("kind") == "test"
+                ]
+                handoffs.append({
+                    "tool": "directory",
+                    "status": "ok",
+                    "from": "consult",
+                    "because": f"assessment suggested {names}",
+                    "ms": int((time.perf_counter() - started_tool) * 1000),
+                })
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Handoff directory failed: %s", exc)
+                handoffs.append({"tool": "directory", "status": "error"})
+
+    if not structured:
+        return {}
+
+    return {
+        # Attached under `admin` so the UI renders these exactly like any
+        # other provider result — the patient should not have to know which
+        # agent found them.
+        "agent_outputs": [{
+            "route": "admin",
+            "answer": "",
+            "structured": structured,
+            "confidence": 0.8,
+            "via_handoff": True,
+        }],
+        "trace": [{
+            "node": "fulfil",
+            "handoffs": handoffs,
+            "tools": handoffs,
+            "source": "agent_handoff",
+            "ms": int((time.perf_counter() - started) * 1000),
+        }],
+    }
+
+
 def judge_node(state: AgentState) -> dict:
     """Output safety check. May soften or block; never escalates urgency."""
     red_flags = state.get("red_flags") or {}
@@ -834,6 +966,7 @@ def build_agent_graph():
     graph.add_node("web_agent", web_agent)
     graph.add_node("direct_agent", direct_agent)
     graph.add_node("merge", merge_node)
+    graph.add_node("fulfil", fulfil_node)
     graph.add_node("judge", judge_node)
 
     graph.add_edge(START, "guard_input")
@@ -851,7 +984,10 @@ def build_agent_graph():
     for node in _AGENT_NODES:
         graph.add_edge(node, "merge")
 
-    graph.add_edge("merge", "judge")
+    # merge → fulfil → judge: one bounded handoff hop after the parallel
+    # agents have run, before the answer is judged.
+    graph.add_edge("merge", "fulfil")
+    graph.add_edge("fulfil", "judge")
     graph.add_edge("judge", END)
 
     return graph.compile()
@@ -862,7 +998,15 @@ agent_graph = build_agent_graph()
 
 def topology() -> dict:
     return {
-        "nodes": ["guard_input", "cache_lookup", "route", *_AGENT_NODES, "merge", "judge"],
+        "nodes": [
+            "guard_input", "cache_lookup", "route", *_AGENT_NODES,
+            "merge", "fulfil", "judge",
+        ],
+        "handoff": {
+            "enabled": True,
+            "max_hops": 1,
+            "edges": ["consult -> find_care", "consult -> directory"],
+        },
         "parallel_agents": list(VALID_ROUTES),
         "max_parallel_routes": MAX_ROUTES,
         "deterministic_nodes": ["guard_input", "cache_lookup", "judge"],

@@ -118,10 +118,10 @@ export default function ProviderDeck({ providers, onSelect, title }: Props) {
   return (
     <div className="rounded-2xl border border-line bg-surface p-3 sm:p-4">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+        <span className="sp-label">
           {title ?? `${count} suggestion${count > 1 ? "s" : ""}`}
-        </p>
-        <span className="text-xs text-ink-400">
+        </span>
+        <span className="sp-numeric text-xs text-ink-400">
           {active + 1} / {count}
         </span>
       </div>
@@ -224,9 +224,9 @@ function Card({
 
   return (
     <div
-      className={`h-[15rem] overflow-hidden rounded-xl border bg-surface p-3.5 ${
+      className={`h-[15rem] overflow-hidden rounded-2xl border bg-surface p-3.5 transition-shadow ${
         focused
-          ? "border-brand-300 shadow-lg shadow-brand-600/10"
+          ? "border-brand-300 shadow-[var(--sp-shadow-brand)]"
           : "border-line shadow-sm"
       }`}
     >
@@ -238,9 +238,7 @@ function Card({
           <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
             {meta.label}
           </p>
-          <p className="font-semibold leading-snug text-ink-900 break-words">
-            {provider.name}
-          </p>
+          <p className="sp-heading break-words text-[0.95rem]">{provider.name}</p>
         </div>
         {provider.rating != null && (
           <span className="flex shrink-0 items-center gap-0.5 text-xs text-ink-500">
