@@ -159,7 +159,7 @@ export default function Login() {
 
               {error && <ErrorNote message={error} />}
               
-              <button className="sp-btn sp-btn-primary w-full py-2.5 lg:py-3.5 rounded-xl flex justify-center items-center gap-2 font-semibold shadow-md shadow-brand-500/20 text-[14px] lg:text-[15px]" disabled={busy}>
+              <button className="sp-btn sp-btn-primary sp-btn-block py-2.5 lg:py-3.5 rounded-xl flex justify-center items-center gap-2 font-semibold shadow-md shadow-brand-500/20 text-[14px] lg:text-[15px]" disabled={busy}>
                 {busy ? "Signing in…" : "Sign In"}
                 {!busy && <Icon name="arrowRight" size={18} />}
               </button>

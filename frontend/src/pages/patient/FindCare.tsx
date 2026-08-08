@@ -430,7 +430,7 @@ function BookingModal({
             <p className="text-sm text-ink-500 mt-2">
               Your doctor can now see your structured intake before the visit.
             </p>
-            <button className="sp-btn sp-btn-primary w-full mt-5" onClick={onBooked}>
+            <button className="sp-btn sp-btn-primary mt-5" onClick={onBooked}>
               Done
             </button>
           </div>

@@ -149,7 +149,7 @@ export default function Confidential() {
 
               <ErrorNote message={error} />
               <button
-                className="sp-btn sp-btn-solid-programme w-full mt-6"
+                className="sp-btn sp-btn-solid-programme mt-6"
                 onClick={() => void start()}
                 disabled={busy}
               >
@@ -236,7 +236,7 @@ export default function Confidential() {
 
               <ErrorNote message={error} />
               <button
-                className="sp-btn sp-btn-solid-programme w-full mt-6"
+                className="sp-btn sp-btn-solid-programme mt-6"
                 onClick={() => void submit()}
                 disabled={busy || Object.keys(answers).length === 0}
               >
@@ -324,7 +324,7 @@ export default function Confidential() {
                   connected to any SuwaPath account.
                 </p>
                 <button
-                  className="sp-btn sp-btn-danger sp-btn-block"
+                  className="sp-btn sp-btn-danger"
                   onClick={() => void deleteSession()}
                   disabled={busy}
                 >

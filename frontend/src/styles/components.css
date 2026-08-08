@@ -152,6 +152,17 @@
     font-size: var(--sp-text-xs);
     border-radius: var(--sp-radius-sm);
   }
+  /* Full-width buttons, for narrow containers only.
+     ---------------------------------------------------------------------
+     A button stretched across a wide card becomes a long horizontal bar:
+     the label floats alone in the middle, the hit target is far larger
+     than the action deserves, and it shouts louder than the content above
+     it. Buttons in cards and panels should size to their label.
+
+     Use this only where the container is itself narrow and the button is
+     the single action in it — the login form, the mobile drawer, the chat
+     rail. Reach for this class rather than a `w-full` utility, so the
+     intent is visible and the exceptions stay countable. */
   .sp-btn-block {
     width: 100%;
   }

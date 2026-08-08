@@ -547,7 +547,7 @@ export default function Assistant() {
           </div>
           <button
             onClick={() => setPinPrompt(true)}
-            className="sp-btn sp-btn-ghost mt-2 w-full justify-center"
+            className="sp-btn sp-btn-ghost sp-btn-block mt-2 justify-center"
           >
             <Icon name="lock" size={16} />
             Private chat
@@ -556,7 +556,7 @@ export default function Assistant() {
               way back into one. */}
           <button
             onClick={() => setResumePrompt(true)}
-            className="sp-btn sp-btn-ghost mt-1 w-full justify-center text-sm"
+            className="sp-btn sp-btn-ghost sp-btn-block mt-1 justify-center text-sm"
           >
             Resume a private chat
           </button>
