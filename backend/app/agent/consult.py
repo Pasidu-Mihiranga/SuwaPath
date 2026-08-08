@@ -450,7 +450,11 @@ Write your reply in {language_name}."""
 
 
 def _context_line(patient_context: dict) -> str:
-    """A compact, de-identified background line."""
+    """A compact, de-identified background line.
+
+    ``remembered`` is appended last and framed as recall, not record, so the
+    model treats it as something to confirm rather than assert.
+    """
     bits = []
     if patient_context.get("age_band"):
         bits.append(str(patient_context["age_band"]).replace("_", " "))
@@ -467,7 +471,14 @@ def _context_line(patient_context: dict) -> str:
     allergies = patient_context.get("allergies") or []
     if allergies:
         bits.append("allergic to " + ", ".join(str(a) for a in allergies[:3]))
-    return "; ".join(bits) or "no background on file"
+    line = "; ".join(bits) or "no background on file"
+
+    remembered = patient_context.get("remembered") or []
+    if remembered:
+        line += ". Previously mentioned (confirm rather than assume): " + "; ".join(
+            str(item) for item in remembered[:6]
+        )
+    return line
 
 
 # --------------------------------------------------------------------------

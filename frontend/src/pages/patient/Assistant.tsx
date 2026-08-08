@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "../../components/Markdown";
+import ProviderDeck, { type ProviderCard } from "../../components/ProviderDeck";
 import {
   Card,
   Chip,
@@ -32,6 +33,7 @@ import {
 } from "../../components/ui";
 import { API_BASE, api, errorMessage, tokens } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import * as voice from "../../lib/voice";
 
 interface Turn {
   role: "user" | "assistant";
@@ -115,7 +117,16 @@ export default function Assistant() {
   const [showHistory, setShowHistory] = useState(false);
   const [pinPrompt, setPinPrompt] = useState(false);
   const [pin, setPin] = useState("");
+  const [booking, setBooking] = useState<ProviderCard | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [listening, setListening] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const listenerRef = useRef<voice.Listener | null>(null);
+
+  // Resolved once: a microphone button that does nothing is worse than none.
+  const canListen = voice.listeningSupported();
+  const canSpeak = voice.speechSupported();
 
   const loadSessions = useCallback(async () => {
     try {
@@ -242,6 +253,122 @@ export default function Assistant() {
       setBusy(false);
       void loadSessions();
     }
+  }
+
+  /**
+   * Dictate instead of typing.
+   *
+   * The transcript lands in the input box rather than sending immediately —
+   * speech recognition mishears, and in a medical context an unreviewed
+   * "I have chest pain" that was actually "I have chest strain" is worth one
+   * extra tap to prevent.
+   */
+  function toggleListening() {
+    if (listening) {
+      listenerRef.current?.stop();
+      return;
+    }
+    setError(null);
+    const handle = voice.listen({
+      language: user?.preferred_language ?? "en",
+      onPartial: setInput,
+      onFinal: setInput,
+      onError: setError,
+      onEnd: () => {
+        setListening(false);
+        listenerRef.current = null;
+      },
+    });
+    if (!handle) {
+      setError("Your browser does not support voice input. Please type instead.");
+      return;
+    }
+    listenerRef.current = handle;
+    setListening(true);
+  }
+
+  useEffect(() => () => {
+    listenerRef.current?.stop();
+    voice.stopSpeaking();
+  }, []);
+
+  /**
+   * Upload a report or scan without leaving the conversation.
+   *
+   * The file goes to the same endpoint the Reports page uses — OCR, flagging
+   * against the report's own reference ranges, and care routing all happen
+   * server-side exactly as before. What is different is only where the
+   * patient is standing: the extracted findings come straight back as the
+   * next assistant turn, so they can ask "what does the ferritin mean?"
+   * immediately instead of navigating to another page and losing context.
+   *
+   * Private sessions do not accept uploads. A document is durable by nature
+   * and would outlive a conversation that promises to leave no trace.
+   */
+  async function uploadFile(file: File) {
+    if (isPrivate) {
+      setError(
+        "Uploads are turned off in a private chat, because a saved document " +
+          "would outlast the conversation. Start a normal chat to upload.",
+      );
+      return;
+    }
+
+    const isImage = file.type.startsWith("image/");
+    const endpoint = isImage ? "/images" : "/documents";
+    const form = new FormData();
+    form.append("file", file);
+
+    setUploading(true);
+    setError(null);
+    setTurns((previous) => [
+      ...previous,
+      { role: "user", content: `Uploaded **${file.name}**` },
+    ]);
+
+    try {
+      const { data } = await api.post(endpoint, form);
+      const summary =
+        data.explanation ??
+        data.summary ??
+        data.analysis?.explanation ??
+        "I've saved that. Ask me anything about it.";
+
+      setTurns((previous) => [
+        ...previous,
+        {
+          role: "assistant",
+          content: summary,
+          routes: ["records"],
+          structured: { records: data },
+        },
+      ]);
+    } catch (err) {
+      setError(errorMessage(err, "That file could not be processed."));
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  /**
+   * Picking a card continues the conversation rather than navigating away.
+   *
+   * A doctor goes straight to the booking sheet, because that is the whole
+   * point of surfacing them. A facility or a test has no single obvious next
+   * step, so it becomes a follow-up question and the assistant answers in
+   * context — the patient never loses their place.
+   */
+  function pickProvider(provider: ProviderCard) {
+    if (provider.kind === "doctor" && provider.doctor_id) {
+      setBooking(provider);
+      return;
+    }
+    if (provider.kind === "hospital") {
+      void send(`Tell me more about ${provider.name} and how to get seen there.`);
+      return;
+    }
+    void send(`Where should I get the ${provider.name}, and how do I prepare?`);
   }
 
   function handleEvent(event: any) {
@@ -445,7 +572,13 @@ export default function Assistant() {
               )}
 
               {turns.map((turn, index) => (
-                <TurnBubble key={index} turn={turn} />
+                <TurnBubble
+                  key={index}
+                  turn={turn}
+                  onPick={pickProvider}
+                  canSpeak={canSpeak}
+                  language={user?.preferred_language ?? "en"}
+                />
               ))}
 
               {trace.length > 0 && <Thinking items={trace} />}
@@ -461,19 +594,62 @@ export default function Assistant() {
               }}
             >
               <input
+                ref={fileRef}
+                type="file"
+                accept="application/pdf,image/jpeg,image/png"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void uploadFile(file);
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={busy || uploading || isPrivate}
+                title={
+                  isPrivate
+                    ? "Uploads are turned off in a private chat"
+                    : "Attach a report or scan"
+                }
+                aria-label="Attach a report or scan"
+                className="sp-btn sp-btn-ghost shrink-0 px-2.5"
+              >
+                <Icon name="upload" size={18} />
+              </button>
+              {canListen && (
+                <button
+                  type="button"
+                  onClick={toggleListening}
+                  disabled={busy || uploading}
+                  aria-label={listening ? "Stop dictating" : "Dictate a message"}
+                  aria-pressed={listening}
+                  title={listening ? "Stop dictating" : "Dictate a message"}
+                  className={`sp-btn shrink-0 px-2.5 ${
+                    listening
+                      ? "bg-danger-surface text-danger-text border-danger-border"
+                      : "sp-btn-ghost"
+                  }`}
+                >
+                  <Icon name="mic" size={18} />
+                </button>
+              )}
+              <input
                 className="sp-input"
                 placeholder={
-                  isPrivate
-                    ? "Private chat — ask anything…"
-                    : "Describe a symptom, or ask about your reports…"
+                  listening
+                    ? "Listening…"
+                    : isPrivate
+                      ? "Private chat — ask anything…"
+                      : "Describe a symptom, or ask about your reports…"
                 }
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                disabled={busy}
+                disabled={busy || uploading}
               />
               <button
                 className="sp-btn sp-btn-primary"
-                disabled={busy || !input.trim()}
+                disabled={busy || uploading || !input.trim()}
               >
                 <Icon name="send" size={18} />
                 <span className="hidden sm:inline">Send</span>
@@ -502,6 +678,178 @@ export default function Assistant() {
           onConfirm={startPrivate}
         />
       )}
+
+      {booking && (
+        <BookingSheet
+          provider={booking}
+          onClose={() => setBooking(null)}
+          onBooked={(message) => {
+            setBooking(null);
+            setTurns((previous) => [
+              ...previous,
+              { role: "assistant", content: message, routes: ["admin"] },
+            ]);
+          }}
+          onError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Confirm and book, in place.
+ *
+ * Only slots the server offered are bookable — the sheet never lets the
+ * patient type a time. That keeps the one invariant that matters here: a
+ * booking always corresponds to a slot the availability service actually
+ * generated, at the doctor's own slot length.
+ */
+function BookingSheet({
+  provider,
+  onClose,
+  onBooked,
+  onError,
+}: {
+  provider: ProviderCard;
+  onClose: () => void;
+  onBooked: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [slots, setSlots] = useState<any[] | null>(null);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get(
+          `/providers/doctors/${provider.doctor_id}/availability`,
+        );
+        if (cancelled) return;
+        const available = data.slots ?? data.results ?? [];
+        setSlots(available);
+        setChosen(available[0]?.start ?? provider.next_available?.start ?? null);
+      } catch {
+        if (cancelled) return;
+        // Fall back to the single slot the card already showed.
+        const fallback = provider.next_available ? [provider.next_available] : [];
+        setSlots(fallback);
+        setChosen(provider.next_available?.start ?? null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
+
+  async function confirm() {
+    if (!chosen || !provider.doctor_id) return;
+    setSaving(true);
+    try {
+      await api.post("/appointments", {
+        doctor_id: provider.doctor_id,
+        scheduled_start: chosen,
+        visit_type: "physical",
+        reason: reason.trim() || null,
+      });
+      const when = slots?.find((s) => s.start === chosen);
+      onBooked(
+        `**Booked.** You're seeing ${provider.name}` +
+          (provider.hospital_name ? ` at ${provider.hospital_name}` : "") +
+          (when ? ` on ${when.date_label}, ${when.label}` : "") +
+          ".\n\nIt's in **Appointments** now, and the clinic can see it too. " +
+          "Bring any recent reports with you.",
+      );
+    } catch (err) {
+      onError(errorMessage(err, "That slot could not be booked."));
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/50 p-4">
+      <Card className="w-full max-w-md">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-semibold text-ink-900">Book {provider.name}</h2>
+            <p className="text-sm text-ink-500">
+              {provider.specialty}
+              {provider.hospital_name ? ` · ${provider.hospital_name}` : ""}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="shrink-0 text-ink-400 hover:text-ink-700"
+          >
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+
+        {provider.fee_lkr != null && (
+          <p className="mt-2 text-sm text-ink-600">
+            Consultation fee{" "}
+            <strong className="font-semibold text-ink-900">
+              LKR {Math.round(provider.fee_lkr).toLocaleString("en-LK")}
+            </strong>
+          </p>
+        )}
+
+        <p className="mt-4 mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-400">
+          Choose a time
+        </p>
+        {slots === null ? (
+          <p className="py-3 text-sm text-ink-400">Checking availability…</p>
+        ) : slots.length === 0 ? (
+          <p className="py-3 text-sm text-ink-500">
+            No free slots are published for this doctor right now.
+          </p>
+        ) : (
+          <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
+            {slots.slice(0, 12).map((slot: any) => (
+              <button
+                key={slot.start}
+                onClick={() => setChosen(slot.start)}
+                className={`rounded-lg border px-2.5 py-1.5 text-sm transition ${
+                  chosen === slot.start
+                    ? "border-brand-500 bg-brand-50 text-brand-800"
+                    : "border-line bg-surface text-ink-700 hover:border-brand-300"
+                }`}
+              >
+                {slot.date_label}, {slot.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <label className="mt-4 block text-xs font-semibold uppercase tracking-wide text-ink-400">
+          Reason (optional)
+        </label>
+        <input
+          className="sp-input mt-1.5"
+          placeholder="What would you like to discuss?"
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
+
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="sp-btn sp-btn-ghost flex-1 justify-center">
+            Cancel
+          </button>
+          <button
+            onClick={confirm}
+            disabled={!chosen || saving}
+            className="sp-btn sp-btn-primary flex-1 justify-center"
+          >
+            {saving ? "Booking…" : "Confirm"}
+          </button>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -542,7 +890,66 @@ function Welcome({
   );
 }
 
-function TurnBubble({ turn }: { turn: Turn }) {
+/**
+ * Merge the two sources of provider suggestions into one deck.
+ *
+ * `find_care` ranks by distance and live availability from a structured
+ * recommendation; `directory` answers the fuzzy questions ("speaks Tamil",
+ * "open Sunday") by semantic search. They overlap, so matches are keyed by
+ * identity and the availability-bearing entry wins — a card that can show a
+ * real next free slot is strictly more useful than one that cannot.
+ */
+function providerCards(structured?: Record<string, any>): ProviderCard[] {
+  const admin = structured?.admin ?? {};
+  const byKey = new Map<string, ProviderCard>();
+
+  const put = (card: ProviderCard, preferExisting = false) => {
+    const key = `${card.kind}:${card.doctor_id ?? card.hospital_id ?? card.test_id ?? card.name}`;
+    if (preferExisting && byKey.has(key)) return;
+    byKey.set(key, { ...byKey.get(key), ...card });
+  };
+
+  for (const doctor of admin.doctors ?? []) {
+    put({ kind: "doctor", ...doctor });
+  }
+  for (const provider of admin.providers ?? []) {
+    // Directory hits must not overwrite a `next_available` we already have.
+    const key = `${provider.kind}:${provider.doctor_id ?? provider.hospital_id ?? provider.test_id ?? provider.name}`;
+    const existing = byKey.get(key);
+    byKey.set(key, existing ? { ...provider, ...existing } : provider);
+  }
+  for (const facility of admin.facilities ?? []) {
+    put({ kind: "hospital", ...facility }, true);
+  }
+
+  return [...byKey.values()].filter((c) => c.name);
+}
+
+function deckTitle(cards: ProviderCard[]): string {
+  const kinds = new Set(cards.map((c) => c.kind));
+  if (kinds.size === 1) {
+    const noun =
+      [...kinds][0] === "doctor"
+        ? "doctor"
+        : [...kinds][0] === "hospital"
+          ? "facility"
+          : "test";
+    return `${cards.length} ${noun}${cards.length > 1 ? "s" : ""} — swipe to compare`;
+  }
+  return `${cards.length} suggestions — swipe to compare`;
+}
+
+function TurnBubble({
+  turn,
+  onPick,
+  canSpeak,
+  language,
+}: {
+  turn: Turn;
+  onPick: (provider: ProviderCard) => void;
+  canSpeak: boolean;
+  language: string;
+}) {
   if (turn.role === "user") {
     return (
       <div className="flex justify-end">
@@ -553,7 +960,7 @@ function TurnBubble({ turn }: { turn: Turn }) {
     );
   }
 
-  const doctors = turn.structured?.admin?.doctors ?? [];
+  const cards = providerCards(turn.structured);
   const tests = turn.structured?.consult?.consult?.tests ?? [];
   const urgency = turn.consult?.urgency;
 
@@ -595,6 +1002,17 @@ function TurnBubble({ turn }: { turn: Turn }) {
                 : ""}
             </span>
           )}
+          {canSpeak && (
+            <button
+              type="button"
+              onClick={() => voice.speak(turn.content, language)}
+              aria-label="Read this answer aloud"
+              title="Read aloud"
+              className="text-ink-400 transition hover:text-brand-700"
+            >
+              <Icon name="volumeUp" size={14} />
+            </button>
+          )}
         </div>
 
         {/* Structured results render as UI, not as prose. */}
@@ -618,35 +1036,8 @@ function TurnBubble({ turn }: { turn: Turn }) {
           </div>
         )}
 
-        {doctors.length > 0 && (
-          <div className="space-y-2">
-            {doctors.slice(0, 3).map((doctor: any) => (
-              <div
-                key={doctor.doctor_id}
-                className="rounded-xl border border-line bg-surface p-3"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-ink-900">{doctor.name}</p>
-                    <p className="text-xs text-ink-500">
-                      {doctor.specialty} · {doctor.hospital_name}
-                    </p>
-                  </div>
-                  {doctor.distance_km != null && (
-                    <span className="shrink-0 text-xs text-ink-500">
-                      {doctor.distance_km} km
-                    </span>
-                  )}
-                </div>
-                {doctor.next_available && (
-                  <p className="mt-1 text-xs font-medium text-brand-700">
-                    Next: {doctor.next_available.date_label},{" "}
-                    {doctor.next_available.label}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
+        {cards.length > 0 && (
+          <ProviderDeck providers={cards} onSelect={onPick} title={deckTitle(cards)} />
         )}
 
         {turn.citations && turn.citations.length > 0 && (

@@ -255,6 +255,11 @@ def append(
         # cannot say something the patient never did.
         if role == "user" and session.message_count == 0:
             session.title = _title_from(content)
+        # A crisis disclosure must not become a heading someone else can read
+        # over their shoulder. The conversation is still theirs and still
+        # deletable — only the label is made neutral.
+        if role == "assistant" and (meta or {}).get("guard", {}).get("input") == "crisis":
+            session.title = "Support conversation"
 
     session.message_count += 1
     session.last_message_at = datetime.now(timezone.utc)

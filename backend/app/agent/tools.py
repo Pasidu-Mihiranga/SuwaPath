@@ -31,6 +31,7 @@ from app.models.enums import AppointmentStatus, GuardianPermissionType, UserRole
 from app.models.identity import GuardianRelationship, PatientProfile, User
 from app.agent import websearch
 from app.models.providers import Doctor, Hospital
+from app.services import knowledge
 from app.services.knowledge import knowledge_service
 from app.services.matching import MatchCriteria, match_doctors, match_facilities
 
@@ -310,9 +311,24 @@ def tool_medications(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
 
 
 def tool_knowledge(db: Session, scope: dict, *, question: str = "", **_: Any) -> tuple[str, dict]:
-    """Grounded retrieval from the curated health corpus."""
-    grounding, citations = knowledge_service.build_context(question, limit=3)
-    if not grounding:
+    """Grounded retrieval from the curated health corpus and the policy FAQ.
+
+    Both are searched because a patient does not know the difference between
+    "what does anaemia mean" and "who can see my anaemia result" — but they
+    are separate collections so a policy question cannot be answered out of
+    clinical guidance, or the reverse.
+    """
+    clinical, clinical_citations = knowledge_service.build_context(
+        question, limit=3, collection=knowledge.CLINICAL
+    )
+    policy, policy_citations = knowledge_service.build_context(
+        question, limit=2, collection=knowledge.POLICY
+    )
+
+    blocks = [b for b in (clinical, policy) if b]
+    citations = clinical_citations + policy_citations
+
+    if not blocks:
         # Said explicitly so the agent refuses rather than improvising. An
         # unanswerable health question is a fine outcome; an invented answer
         # is not.
@@ -322,7 +338,35 @@ def tool_knowledge(db: Session, scope: dict, *, question: str = "", **_: Any) ->
             "offer what SuwaPath can actually do.",
             {"citations": []},
         )
-    return grounding, {"citations": citations}
+    return "\n\n".join(blocks), {"citations": citations}
+
+
+def tool_directory(db: Session, scope: dict, *, question: str = "", **_: Any) -> tuple[str, dict]:
+    """Semantic search over the provider directory.
+
+    Complements ``find_care``, which ranks by distance and availability from a
+    structured recommendation. This one answers the questions that have no
+    structured form — "a paediatrician who speaks Tamil", "somewhere open on a
+    Sunday", "the cheapest place for an MRI" — because the directory is
+    indexed as prose generated from the same rows.
+
+    The structured payload rides alongside the text so the UI can render real,
+    bookable cards rather than the model's description of them.
+    """
+    results = knowledge_service.search_providers(question, limit=6)
+    if not results:
+        return "No matching provider was found in the directory.", {"providers": []}
+
+    providers = [
+        {**r.doc.payload, "match_score": round(r.score, 3), "why": r.doc.title}
+        for r in results
+        if r.doc.payload
+    ]
+    text = "\n\n".join(f"[{r.doc.id}] {r.doc.title}\n{r.doc.text}" for r in results)
+    return text, {
+        "providers": providers,
+        "citations": [r.to_citation() for r in results],
+    }
 
 
 def tool_recommendation(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
@@ -388,6 +432,7 @@ TOOLS = {
     "knowledge": tool_knowledge,
     "recommendation": tool_recommendation,
     "web_search": tool_web_search,
+    "directory": tool_directory,
 }
 
 # Which tools each route is allowed to call.
@@ -397,7 +442,7 @@ TOOLS = {
 # earlier answers read as pasted reference material rather than a reply.
 ROUTE_TOOLS: dict[str, tuple[str, ...]] = {
     "consult": ("recommendation",),
-    "admin": ("appointments", "find_care"),
+    "admin": ("appointments", "find_care", "directory"),
     "records": ("records", "medications"),
     "knowledge": ("knowledge",),
     "web": ("web_search",),
