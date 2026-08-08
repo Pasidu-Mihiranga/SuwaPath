@@ -449,3 +449,50 @@ def list_tests(db: Session = Depends(get_db)) -> list[dict]:
         }
         for t in rows
     ]
+
+
+@router.get("/doctors/{doctor_id}/availability")
+def doctor_availability(
+    doctor_id: str,
+    days: int = Query(default=21, ge=1, le=60),
+    limit: int = Query(default=12, ge=1, le=60),
+    visit_type: VisitType | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Free slots for one doctor, so a booking UI can offer a real choice.
+
+    Slots come from the same generator the matcher uses, at the doctor's own
+    published slot length. Offering a time that booking would then reject is
+    the failure mode this exists to avoid, so nothing here is invented — a
+    slot appears only if it is inside a published clinic block and no
+    occupying appointment overlaps it.
+    """
+    doctor = db.execute(
+        select(Doctor)
+        .options(
+            selectinload(Doctor.schedules),
+            selectinload(Doctor.user),
+            selectinload(Doctor.specialty),
+            selectinload(Doctor.hospital),
+        )
+        .where(Doctor.id == doctor_id, Doctor.is_active.is_(True))
+    ).scalar_one_or_none()
+
+    if doctor is None:
+        raise HTTPException(status_code=404, detail="Doctor not found.")
+
+    slots = generate_slots_for_doctor(
+        db, doctor, days=days, visit_type=visit_type, limit=limit
+    )
+
+    return {
+        "doctor_id": doctor.id,
+        "name": doctor.user.full_name if doctor.user else None,
+        "specialty": doctor.specialty.name if doctor.specialty else None,
+        "hospital_name": doctor.hospital.name if doctor.hospital else None,
+        "consultation_fee_lkr": doctor.consultation_fee_lkr,
+        "accepts_new_patients": doctor.accepts_new_patients,
+        "count": len(slots),
+        "slots": [slot.to_dict() for slot in slots],
+    }

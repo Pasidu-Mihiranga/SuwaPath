@@ -79,6 +79,10 @@ ROUTE_FIELDS: dict[str, frozenset[str]] = {
         "age_band", "sex", "is_pregnant", "pregnancy_week", "chronic_conditions",
         "allergies", "current_medications", "symptoms", "duration_text",
         "severity", "chief_complaint", "negative_findings",
+        # Durable facts the patient told the assistant in earlier
+        # conversations. Same class as the fields above — clinical, never
+        # identifying — and carried under the same allowlist discipline.
+        "remembered",
     }),
     "admin": frozenset({
         "age_band", "city", "preferred_language", "specialty_code",
@@ -106,6 +110,10 @@ ROUTE_FIELDS: dict[str, frozenset[str]] = {
         "age_band", "sex", "is_pregnant", "pregnancy_week", "chronic_conditions",
         "allergies", "current_medications", "symptoms", "duration_text",
         "severity", "chief_complaint", "negative_findings",
+        # Durable facts the patient told the assistant in earlier
+        # conversations. Same class as the fields above — clinical, never
+        # identifying — and carried under the same allowlist discipline.
+        "remembered",
     }),
 }
 

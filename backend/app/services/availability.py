@@ -51,6 +51,47 @@ def _combine(day: date, moment: time) -> datetime:
     return datetime.combine(day, moment, tzinfo=timezone.utc)
 
 
+def _slots_in_block(
+    doctor: Doctor,
+    schedule: DoctorSchedule,
+    day: date,
+    booked: set[datetime],
+    now: datetime,
+) -> list[Slot]:
+    """Free slots in one schedule block on one day.
+
+    **The single definition of "is this slot bookable".** Availability used to
+    be computed in two places with subtly different rules — one honoured
+    ``max_patients`` and the other did not — so a doctor's card advertised a
+    slot the booking endpoint then refused. Every caller now goes through
+    here, which is the only way that class of disagreement stays fixed.
+
+    ``max_patients`` caps the block by *position*, not by how many are free:
+    a doctor who accepts 20 patients between 08:00 and 12:00 is offering the
+    first 20 slots of that block, whether or not earlier ones were taken.
+    """
+    cursor = _combine(day, schedule.start_time)
+    block_end = _combine(day, schedule.end_time)
+    step = timedelta(minutes=schedule.slot_duration_minutes)
+
+    slots: list[Slot] = []
+    issued = 0
+    while cursor + step <= block_end and issued < schedule.max_patients:
+        if cursor > now and cursor not in booked:
+            slots.append(
+                Slot(
+                    doctor_id=doctor.id,
+                    hospital_id=schedule.hospital_id or doctor.hospital_id,
+                    start=cursor,
+                    end=cursor + step,
+                    visit_type=VisitType(str(schedule.visit_type)),
+                )
+            )
+        cursor += step
+        issued += 1
+    return slots
+
+
 def generate_slots_for_doctor(
     db: Session,
     doctor: Doctor,
@@ -79,28 +120,7 @@ def generate_slots_for_doctor(
                 continue
             if visit_type and str(schedule.visit_type) != str(visit_type):
                 continue
-
-            cursor = _combine(day, schedule.start_time)
-            block_end = _combine(day, schedule.end_time)
-            step = timedelta(minutes=schedule.slot_duration_minutes)
-            issued = 0
-
-            while cursor + step <= block_end and issued < schedule.max_patients:
-                if cursor > now and cursor not in booked:
-                    slots.append(
-                        Slot(
-                            doctor_id=doctor.id,
-                            hospital_id=schedule.hospital_id or doctor.hospital_id,
-                            start=cursor,
-                            end=cursor + step,
-                            visit_type=VisitType(str(schedule.visit_type)),
-                        )
-                    )
-                    if limit and len(slots) >= limit:
-                        slots.sort(key=lambda s: s.start)
-                        return slots[:limit]
-                cursor += step
-                issued += 1
+            slots.extend(_slots_in_block(doctor, schedule, day, booked, now))
 
     slots.sort(key=lambda s: s.start)
     return slots[:limit] if limit else slots
@@ -159,21 +179,10 @@ def next_available_map(
             for schedule in sorted(schedules, key=lambda s: s.start_time):
                 if schedule.day_of_week != day.weekday():
                     continue
-                cursor = _combine(day, schedule.start_time)
-                block_end = _combine(day, schedule.end_time)
-                step = timedelta(minutes=schedule.slot_duration_minutes)
-                while cursor + step <= block_end:
-                    if cursor > now and cursor not in booked:
-                        found = Slot(
-                            doctor_id=doctor.id,
-                            hospital_id=schedule.hospital_id or doctor.hospital_id,
-                            start=cursor,
-                            end=cursor + step,
-                            visit_type=VisitType(str(schedule.visit_type)),
-                        )
-                        break
-                    cursor += step
-                if found:
+                # Same rule as everywhere else — see _slots_in_block.
+                available = _slots_in_block(doctor, schedule, day, booked, now)
+                if available:
+                    found = available[0]
                     break
         if found:
             result[doctor.id] = found
@@ -201,15 +210,31 @@ def is_slot_free(
 
 
 def slot_matches_schedule(doctor: Doctor, start: datetime, end: datetime) -> bool:
-    """Guard against booking outside the doctor's published hours."""
+    """Guard against booking outside the doctor's published hours.
+
+    Also enforces ``max_patients``. Checking only the block window let a
+    booking land past the doctor's stated daily cap — a slot the availability
+    endpoints correctly refuse to offer, but which a hand-crafted request
+    could still take.
+    """
     start = _as_utc(start)
+    end = _as_utc(end)
+
     for schedule in doctor.schedules:
         if not schedule.is_active or schedule.day_of_week != start.weekday():
             continue
+
         block_start = _combine(start.date(), schedule.start_time)
         block_end = _combine(start.date(), schedule.end_time)
-        if block_start <= start and _as_utc(end) <= block_end:
+        if not (block_start <= start and end <= block_end):
+            continue
+
+        # Position of this start within the block, counted in slot steps.
+        step = timedelta(minutes=schedule.slot_duration_minutes)
+        offset = (start - block_start) // step
+        if offset < schedule.max_patients:
             return True
+
     return False
 
 

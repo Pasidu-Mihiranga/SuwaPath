@@ -77,8 +77,10 @@ ROUTER_PROMPT = """You classify a patient's message for a healthcare assistant.
 Available routes:
 - consult:   they are describing how they feel — a symptom, pain, illness,
              or answering a follow-up question about one
-- admin:     appointments, finding or booking a doctor or hospital
-- records:   their uploaded reports, test results, scans, medications
+- admin:     appointments, and finding or booking a doctor, hospital or
+             laboratory — including where a test can be done and what it costs
+- records:   results they ALREADY have — a report they uploaded, a past scan's
+             findings, their medication list. Not where to obtain a new test.
 - knowledge: general health questions not about their own data
 - web:       something current that a fixed reference cannot know — an
              outbreak, a recall, this year's guidance, recent news
@@ -200,7 +202,11 @@ def route_node(state: AgentState) -> dict:
             "reasoning": "Continues an open consultation.",
         })
 
-    routes = _prune_routes(routes, mid_consultation=mid_consultation)
+    routes = _prune_routes(
+        routes,
+        mid_consultation=mid_consultation,
+        seeking_service=bool(_SEEKING_SERVICE.search(message or "")),
+    )
 
     return {
         "routes": routes,
@@ -223,7 +229,9 @@ def _awaiting_answer(history: list[dict]) -> bool:
     return False
 
 
-def _prune_routes(routes: list[dict], *, mid_consultation: bool) -> list[dict]:
+def _prune_routes(
+    routes: list[dict], *, mid_consultation: bool, seeking_service: bool = False
+) -> list[dict]:
     """Drop routes that only add noise.
 
     Classifiers are generous — they will happily return `direct` alongside
@@ -235,6 +243,14 @@ def _prune_routes(routes: list[dict], *, mid_consultation: bool) -> list[dict]:
     """
     if not routes:
         return routes
+
+    # "Where can I get an MRI and what does it cost?" shares every keyword
+    # with "what did my MRI show?". Classifiers routinely pick `records` for
+    # both, and the patient then gets their old blood count read back at them
+    # instead of a price. The question form disambiguates it; the classifier
+    # does not get a vote.
+    if seeking_service and any(r["route"] == "admin" for r in routes):
+        routes = [r for r in routes if r["route"] != "records"]
 
     # `direct` is the catch-all. If anything substantive was also selected,
     # the catch-all has nothing to contribute.
@@ -271,9 +287,28 @@ _FALLBACK_KEYWORDS = [
 _CLAUSE_SPLIT = re.compile(r"\band\b|\balso\b|[;?]|,\s*(?=and\b)", re.I)
 
 
+# "Where can I get an MRI" and "what did my MRI show" share every keyword. The
+# difference is whether the patient is looking for a service or for their own
+# result, so this is checked before the keyword table and wins outright.
+_SEEKING_SERVICE = re.compile(
+    r"\b(where|which (place|hospital|lab|clinic)|how much|what does it cost|"
+    r"cheapest|nearest|book|find|get)\b.{0,40}"
+    r"\b(test|scan|mri|ct|x-?ray|ultrasound|blood work|lab|biopsy|screening)\b"
+    r"|\b(test|scan|mri|ct|x-?ray|ultrasound|biopsy)\b.{0,30}"
+    r"\b(cost|price|near me|available|where)\b",
+    re.I,
+)
+
+
 def _fallback_routes(message: str) -> list[dict]:
     """Keyword multi-intent detection, used when no LLM router is available."""
     lowered = (message or "").lower()
+    if _SEEKING_SERVICE.search(lowered):
+        return [{
+            "route": "admin",
+            "confidence": 0.7,
+            "reasoning": "Looking for where to obtain a test, not for a past result.",
+        }]
     clauses = [c.strip() for c in _CLAUSE_SPLIT.split(lowered) if c.strip()]
     if not clauses:
         clauses = [lowered]

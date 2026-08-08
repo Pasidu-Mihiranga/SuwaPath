@@ -54,12 +54,15 @@ Requirements added later, in the order they arrived:
 | Centralised style file, no inline-CSS hassle | `styles/tokens.css` |
 | Proper README, cross-platform, no Docker locally, Mermaid diagrams | `README.md` |
 | Free tier only — no pay-as-you-go anywhere | Multi-provider failover |
-| Scrape/synthesise a knowledge base into a vector DB, no hardcoding | **Partly done** — see [What is not done](#what-is-not-done) |
+| Scrape/synthesise a knowledge base into a vector DB, no hardcoding | `app/knowledge/providers.py` — generated from live DB rows |
 | Guardrails and LLM-as-judge | `app/agent/guardrails.py` |
 | **Privacy** — "is PII masking enough? I don't think so" | `app/privacy/boundary.py` |
 | Unify symptom checker + assistant + STD advisor into one ChatGPT-like chat | `app/agent/`, `pages/patient/Assistant.tsx` |
 | Ask follow-up questions dynamically, reason backwards, like a doctor | `app/agent/consult.py` |
 | Private mode, resumable with a 6-digit PIN, nothing stored | `app/models/chat.py`, `app/services/chat_store.py` |
+| Suggest doctors/labs as a swipeable card deck, like the AgentKap reference | `components/ProviderDeck.tsx` |
+| Book, upload and ask — all from inside the chat | `pages/patient/Assistant.tsx` |
+| Remember the patient across conversations | `app/models/memory.py`, `app/services/memory.py` |
 
 The privacy question was flagged by the user as the single biggest concern,
 and it is the one the architecture is most obviously bent around.
@@ -119,6 +122,30 @@ route pruning, and a cross-platform README with Mermaid diagrams.
 **Current state:** `tests/test_agent.py` 19/19, `tests/test_scenarios.py`
 73/73, `tsc --noEmit` clean.
 
+### Phase 6 — Closing the gaps (2026-08-08)
+
+Everything the previous phase listed as "not done", plus a provider carousel
+modelled on an e-commerce reference the user supplied.
+
+- **Knowledge ingestion** became real: three Qdrant collections, and the
+  provider directory is now *generated from live database rows* rather than
+  hand-written. 123 documents from the seeded data.
+- **Provider deck** — a fanned card carousel for suggesting doctors,
+  facilities and tests, pickable from the conversation.
+- **In-chat actions** — booking sheet and report/scan upload, without leaving
+  the chat.
+- **Memory tiers** — durable facts on PostgreSQL, with provenance and
+  patient-facing delete.
+- **Voice** — Web Speech dictation and read-aloud, degrading to nothing where
+  unsupported.
+- **Crisis titling** — a crisis disclosure no longer becomes a history heading.
+
+Two availability bugs found and fixed on the way; see
+[Bugs](#11-three-code-paths-disagreed-about-what-a-free-slot-is).
+
+**Current state:** `test_agent.py` 19/19, `test_scenarios.py` 73/73, a new
+16-check feature suite, `tsc --noEmit` and `vite build` clean.
+
 ---
 
 ## Architecture as it stands
@@ -133,6 +160,11 @@ backend/app/
     tools.py                the only way an agent touches data; consent enforced here
     websearch.py            Tavily, domain-ranked, personal queries refused
     state.py                AgentState + the operator.add reducer
+  knowledge/                retrieval corpus and ingestion
+    providers.py            directory prose GENERATED from live DB rows
+    policy.py               how SuwaPath itself works
+    chunking.py             sentence-aware overlapping passages
+    ingest.py               `python -m app.knowledge.ingest --probe`
   privacy/        330 LOC   boundary.py — minimise, pseudonymise, guard, rehydrate
   clinical/     1,200 LOC   lexicon (~90 concepts × 4 scripts), 24 red-flag rules
   services/     5,400 LOC   red_flag_engine, navigation, matching, ocr, vision,
@@ -392,6 +424,40 @@ Two independent misses:
 Both are the same underlying mistake: **regex written against the example in
 front of you rather than the pattern**.
 
+### 11. Three code paths disagreed about what a free slot is
+
+**Symptom:** a doctor's card advertised a next-available slot while the new
+availability endpoint returned zero slots for the same doctor.
+
+**Cause:** `generate_slots_for_doctor` enforced `schedule.max_patients`;
+`next_available_map` did not. Where a clinic block was longer than
+`max_patients × slot_duration` and the early slots were booked, one function
+saw nothing free and the other happily offered a slot past the cap.
+
+Worse, `slot_matches_schedule` — the booking guard — only checked the block
+window, so a slot beyond the doctor's stated daily limit would actually book.
+
+**Fix:** extracted `_slots_in_block` as the single definition of "is this slot
+bookable", used by both enumerators, and taught `slot_matches_schedule` to
+enforce the cap by slot position.
+
+**This is the same class as bug 6, and that is the point.** Availability was
+computed in more than one place, so the copies drifted. Patching the symptom
+again would have guaranteed a third occurrence. If you add another
+availability caller, route it through `_slots_in_block`.
+
+### 12. "Where can I get an MRI" returned the patient's old blood count
+
+**Symptom:** a question about where to obtain a test retrieved the patient's
+existing records instead.
+
+**Cause:** "where can I get an MRI" and "what did my MRI show" share every
+keyword. The classifier picked `records` for both, and the merge led with it.
+
+**Fix:** `_SEEKING_SERVICE` detects the question *form* — where / how much /
+cheapest / nearest, near a test noun — and drops `records` when `admin` is
+also present. The classifier does not get a vote on this one.
+
 ### 10. Smaller ones
 
 | Bug | Cause |
@@ -411,39 +477,36 @@ front of you rather than the pattern**.
 
 ## What is not done
 
-Honest list. Nothing here is blocked; it is unstarted or partial.
+Honest list, after Phase 6 closed most of the previous one.
 
-### High value
+### Worth doing next
 
-- **In-chat actions.** The chat finds doctors and renders cards, but there is
-  no click-to-book, no upload button, no "ask about this report" inside the
-  conversation. The user explicitly asked for the chat to be the centre that
-  reaches the other features. Cards exist; the actions do not.
-- **Knowledge-base ingestion.** Still the 30-document curated corpus. The ask
-  was to scrape or generate realistic synthetic data at scale into Qdrant —
-  symptoms, doctors, hospitals — "because this works as an actual product when
-  a user logs in and queries". Port `aee-capstone/src/services/ingest_service/`
-  (chunkers, pipeline, web_crawler). Target collections:
-  `clinical_knowledge`, `provider_directory` (generated from actual seeded DB
-  rows, not hardcoded), `policy_faq`.
-- **Voice.** LiveKit as primary, degrading cleanly without keys; Web Speech
-  API + Gemini audio as fallback. Not started.
+- **Reindex on write.** `python -m app.knowledge.ingest` must be run manually
+  after an admin adds a doctor. It should be triggered automatically on
+  provider mutations, or on a schedule.
+- **Memory in the UI.** `GET/DELETE /agent/memory` exist and are tested, but
+  nothing in the frontend surfaces them. A memory store the patient cannot see
+  in the product is only half-honest — the endpoints were built first
+  deliberately, but the screen is missing.
+- **Deck actions beyond booking.** Picking a facility or a test asks a
+  follow-up question. Directions, calling the facility, and adding a test to a
+  care plan are not wired.
+- **LiveKit.** `lib/voice.ts` is structured so only `listen()` would change,
+  but the LiveKit path itself is not written. Web Speech covers dictation
+  today; its Sinhala and Tamil accuracy is noticeably worse than English.
 
 ### Medium
 
-- **Memory tiers.** Short-term / long-term / episodic on PostgreSQL. Currently
-  only per-session in-process memory (`cag.memory_store`), which evaporates on
-  restart.
-- **Crisis-session titling.** A crisis message becomes a visible history title,
-  because titles come from the patient's first words. Deletable, and it is
-  their own data — but consider auto-titling crisis-flagged sessions
-  generically.
-- **Sinhala/Tamil assistant output.** The language is passed into every prompt
-  and the clinical lexicon is genuinely trilingual, but the consultation
-  quality in Sinhala and Tamil has not been reviewed by a speaker.
+- **Sinhala/Tamil assistant output** has not been reviewed by a speaker. The
+  clinical lexicon is genuinely trilingual and language is passed into every
+  prompt, but nobody has checked whether the consultation *reads* well.
+- **Bundle size.** 875 kB before gzip, one chunk. Route-level code splitting
+  is the obvious fix.
 - **CV model.** `BaselinePneumoniaAdapter` is a transparent *untrained*
   heuristic. Drop a trained model at `models/pneumonia/*.onnx` and the ONNX
   adapter takes over automatically.
+- **Memory decay.** `confidence` is stored and context facts expire, but
+  nothing decays confidence over time as designed.
 
 ### Before this could touch real patients
 

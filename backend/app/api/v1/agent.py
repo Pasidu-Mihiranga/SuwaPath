@@ -28,7 +28,7 @@ from app.core.security import get_current_user
 from app.models.chat import ChatSession
 from app.models.identity import AuditLog, User
 from app.privacy.boundary import egress_policy_note
-from app.services import chat_store
+from app.services import chat_store, memory
 from app.services.ai_orchestrator import orchestrator_status
 
 logger = logging.getLogger(__name__)
@@ -205,6 +205,13 @@ def _prepare(db: Session, user: User, payload: AgentRequest) -> tuple[dict, Chat
     context = build_patient_context(db, scope["subject_user_id"])
     scope["session_id"] = session.id
 
+    # Durable facts from earlier conversations, so the assistant does not
+    # re-ask what it was told last week. Private sessions read nothing.
+    if not session.is_private:
+        remembered = memory.recall(db, scope["subject_user_id"])
+        if remembered:
+            context["remembered"] = [f"{m.key.replace('_', ' ')}: {m.value}" for m in remembered]
+
     state = {
         "user_text": payload.message.strip(),
         "language": payload.language or session.language,
@@ -280,6 +287,15 @@ def _response(state: dict, result: dict, *, latency_ms: int) -> dict:
 
 
 def _persist(db: Session, session: ChatSession, state: dict, response: dict) -> None:
+    # Learn durable facts *after* answering, so extraction never adds latency
+    # to the reply the patient is waiting for.
+    memory.learn_from_turn(
+        db,
+        state["scope"]["subject_user_id"],
+        text=state["user_text"],
+        session_id=session.id,
+        confidential=session.is_private,
+    )
     chat_store.append(db, session, role="user", content=state["user_text"])
     chat_store.append(
         db,
@@ -419,6 +435,56 @@ async def agent_stream(
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+
+
+# --------------------------------------------------------------------------
+# Memory
+# --------------------------------------------------------------------------
+# A memory store the patient cannot inspect is a surveillance feature. These
+# three endpoints exist so "what does it know about me" and "forget that" are
+# always answerable.
+@router.get("/memory")
+def list_memory(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Everything the assistant durably remembers, with its provenance."""
+    memories = memory.recall(db, current_user.id, limit=50)
+    return {
+        "memories": [
+            {
+                "id": m.id,
+                "kind": m.kind,
+                "key": m.key,
+                "label": m.key.replace("_", " "),
+                "value": m.value,
+                "confidence": round(m.confidence, 2),
+                "learned_from": m.source_quote,
+                "expires_at": m.expires_at,
+                "updated_at": m.updated_at,
+            }
+            for m in memories
+        ],
+    }
+
+
+@router.delete("/memory/{memory_id}")
+def delete_memory(
+    memory_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not memory.forget(db, current_user.id, memory_id):
+        raise HTTPException(status_code=404, detail="That memory was not found.")
+    return {"deleted": True, "id": memory_id}
+
+
+@router.delete("/memory")
+def clear_memory(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return {"deleted": memory.forget_all(db, current_user.id)}
 
 
 @router.get("/status")
