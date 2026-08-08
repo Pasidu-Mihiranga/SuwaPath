@@ -235,7 +235,7 @@ function DoctorCard({ doctor, onBook }: { doctor: any; onBook: () => void }) {
           </span>
         ))}
         {doctor.supports_teleconsultation && (
-          <span className="sp-chip bg-purple-100 text-purple-800">Teleconsultation</span>
+          <Chip tone="programme">Teleconsultation</Chip>
         )}
       </div>
 
@@ -296,7 +296,7 @@ function FacilityCard({ facility }: { facility: any }) {
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           {facility.has_emergency && (
-            <span className="sp-chip bg-red-100 text-red-800">24h Emergency</span>
+            <Chip tone="danger">24h Emergency</Chip>
           )}
           {facility.is_24_hours && (
             <span className="sp-chip bg-brand-100 text-brand-800">Open 24 hours</span>
@@ -328,12 +328,13 @@ function FacilityCard({ facility }: { facility: any }) {
             : `${facility.all_capabilities?.length ?? 0} services`}
         </span>
         <a
-          className="text-brand-700 font-semibold hover:underline"
+          className="inline-flex items-center gap-1 text-brand-700 font-semibold hover:underline"
           href={`https://www.google.com/maps/search/?api=1&query=${facility.latitude},${facility.longitude}`}
           target="_blank"
           rel="noreferrer"
         >
-          View on map →
+          View on map
+          <Icon name="arrowRight" size={16} />
         </a>
       </div>
     </div>

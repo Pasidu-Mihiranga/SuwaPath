@@ -2,11 +2,8 @@ import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Brand, ErrorNote } from "../components/ui";
 import Icon from "../components/Icon";
-import DevLoginTools from "../components/DevLoginTools";
 import { errorMessage } from "../lib/api";
 import { HOME_BY_ROLE, useAuth } from "../lib/auth";
-
-
 
 export default function Login() {
   const { user, login, loading } = useAuth();
@@ -19,11 +16,11 @@ export default function Login() {
 
   if (!loading && user) return <Navigate to={HOME_BY_ROLE[user.role]} replace />;
 
-  async function submit(nextEmail = email, nextPassword = password) {
+  async function submit() {
     setBusy(true);
     setError(null);
     try {
-      const account = await login(nextEmail, nextPassword);
+      const account = await login(email, password);
       navigate(HOME_BY_ROLE[account.role]);
     } catch (err) {
       setError(errorMessage(err, "Could not sign in."));
@@ -127,8 +124,6 @@ export default function Login() {
           </p>
         </div>
       </div>
-      
-      <DevLoginTools onLogin={(email) => submit(email, "Demo@1234")} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import Icon from "../../components/Icon";
 import {
   AiNotice,
   Avatar,
@@ -264,8 +265,9 @@ export function PatientDetail() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link to="/doctor/queue" className="text-sm text-brand-700 hover:underline">
-            ← Back to queue
+          <Link to="/doctor/queue" className="inline-flex items-center gap-1 text-sm text-brand-700 hover:underline">
+            <Icon name="chevronLeft" size={16} />
+            Back to queue
           </Link>
           <h1 className="text-2xl font-bold text-ink-900 mt-1">
             {data.patient.name}
@@ -280,8 +282,8 @@ export function PatientDetail() {
       </header>
 
       {redFlags?.triggered_rules?.length > 0 && (
-        <div className="rounded-2xl border border-red-300 bg-red-50 p-4">
-          <p className="font-bold text-red-900">Red flags identified</p>
+        <div className="rounded-2xl border border-danger-border bg-danger-surface p-4">
+          <p className="font-bold text-danger-text">Red flags identified</p>
           <ul className="mt-2 space-y-2">
             {redFlags.triggered_rules.map((rule: any) => (
               <li key={rule.rule_id} className="text-sm">
@@ -293,7 +295,7 @@ export function PatientDetail() {
               </li>
             ))}
           </ul>
-          <p className="text-xs text-red-800 mt-2">
+          <p className="text-xs text-danger-text mt-2">
             Rule engine {redFlags.rule_engine_version} — deterministic, not model output.
           </p>
         </div>
@@ -459,7 +461,7 @@ export function PatientDetail() {
                   {report.key_findings?.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {report.key_findings.slice(0, 5).map((finding: any, index: number) => (
-                        <span key={index} className="sp-chip bg-orange-100 text-orange-800">
+                        <span key={index} className="sp-chip sp-chip-warn">
                           {finding.test}: {finding.result}
                         </span>
                       ))}
@@ -487,7 +489,7 @@ export function PatientDetail() {
                     {formatDateTime(image.uploaded_at)} · {image.model_name}
                   </p>
                   {image.is_uncertain && (
-                    <span className="sp-chip bg-orange-100 text-orange-800 mt-2">
+                    <span className="sp-chip sp-chip-warn mt-2">
                       Uncertain result
                     </span>
                   )}

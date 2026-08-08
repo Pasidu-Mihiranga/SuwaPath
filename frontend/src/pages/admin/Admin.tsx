@@ -3,6 +3,7 @@ import {
   Card,
   Empty,
   ErrorNote,
+  Icon,
   Spinner,
   Stat,
   StatusChip,
@@ -352,7 +353,7 @@ export function AdminFacilities() {
                   </td>
                   <td className="py-3 px-4">
                     {facility.has_emergency ? (
-                      <span className="sp-chip bg-red-100 text-red-800">24h</span>
+                      <span className="sp-chip sp-chip-danger">24h</span>
                     ) : (
                       <span className="text-ink-400">—</span>
                     )}
@@ -423,8 +424,8 @@ export function AdminAi() {
       </div>
 
       {!orchestrator.gemini_reachable && (
-        <div className="rounded-2xl border border-orange-300 bg-orange-50 p-4">
-          <p className="font-semibold text-orange-900">
+        <div className="sp-notice sp-notice-warn flex-col">
+          <p className="font-semibold">
             Running in deterministic fallback mode
           </p>
           <p className="text-sm text-ink-700 mt-1">
@@ -449,7 +450,7 @@ export function AdminAi() {
                     {node.replace(/_/g, " ")}
                   </span>
                   {index < data.graph.clinical_spine.length - 1 && (
-                    <span className="text-ink-300">→</span>
+                    <Icon name="arrowRight" size={14} className="text-ink-300" />
                   )}
                 </span>
               ))}
@@ -460,7 +461,7 @@ export function AdminAi() {
               <p className="text-xs text-ink-500 mb-1.5">LLM nodes</p>
               <div className="flex flex-wrap gap-1.5">
                 {data.graph.llm_nodes.map((node: string) => (
-                  <span key={node} className="sp-chip bg-purple-100 text-purple-800">
+                  <span key={node} className="sp-chip sp-chip-programme">
                     {node.replace(/_/g, " ")}
                   </span>
                 ))}
@@ -470,7 +471,7 @@ export function AdminAi() {
               <p className="text-xs text-ink-500 mb-1.5">Deterministic nodes</p>
               <div className="flex flex-wrap gap-1.5">
                 {data.graph.deterministic_nodes.map((node: string) => (
-                  <span key={node} className="sp-chip bg-green-100 text-green-800">
+                  <span key={node} className="sp-chip sp-chip-ok">
                     {node.replace(/_/g, " ")}
                   </span>
                 ))}
@@ -510,9 +511,9 @@ export function AdminAi() {
                   <td className="py-2.5 text-ink-600">{adapter.model_name}</td>
                   <td className="py-2.5">
                     {adapter.is_trained_model ? (
-                      <span className="sp-chip bg-green-100 text-green-800">Trained</span>
+                      <span className="sp-chip sp-chip-ok">Trained</span>
                     ) : (
-                      <span className="sp-chip bg-orange-100 text-orange-800">
+                      <span className="sp-chip sp-chip-warn">
                         Baseline
                       </span>
                     )}

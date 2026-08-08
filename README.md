@@ -234,6 +234,12 @@ point `DATABASE_URL` and `QDRANT_URL` at them.
 
 ### 2 · Backend
 
+> **Stay inside `backend/` for every command below.** The venv lives at
+> `backend/.venv`, so running `.venv/bin/python` from the repo root (or any
+> other directory) fails with `no such file or directory`. If you `cd` away
+> to run something else — `brew install`, `docker compose`, editing `.env` —
+> `cd backend` again before the next command here.
+
 ```bash
 cd backend
 python3 -m venv .venv
@@ -616,6 +622,26 @@ clinical images when evaluating an actual model.
 ---
 
 ## Troubleshooting
+
+<details>
+<summary><b>zsh: no such file or directory: .venv/bin/python</b></summary>
+
+You ran the command from the wrong directory. The virtual environment lives at
+`backend/.venv`, not at the repo root — this happens after `cd backend`,
+creating the venv, then `cd ..` for an unrelated step (installing Homebrew
+packages, editing `.env`) without `cd backend` again before continuing. Run
+`cd backend` and retry.
+</details>
+
+<details>
+<summary><b>Login fails in the browser but works with curl</b></summary>
+
+The frontend defaults to `http://127.0.0.1:8000` (see `VITE_API_BASE` in
+`frontend/src/lib/api.ts`). If the backend was restarted, crashed, or is still
+seeding, requests from the browser fail even though a direct `curl` to a
+previously-open terminal succeeds. Confirm `curl http://127.0.0.1:8000/health`
+returns `"status":"ok"` first, then retry in the browser.
+</details>
 
 <details>
 <summary><b>PostgreSQL won't start: "postmaster became multithreaded during startup"</b></summary>

@@ -110,7 +110,7 @@ export function Reports() {
                   </p>
                 </div>
                 {item.abnormal_count > 0 ? (
-                  <span className="sp-chip bg-orange-100 text-orange-800">
+                  <span className="sp-chip sp-chip-warn">
                     {item.abnormal_count} to review
                   </span>
                 ) : (
@@ -215,7 +215,8 @@ function ReportDetail({
             className="sp-btn sp-btn-primary w-full mt-4"
             onClick={() => onFindCare(document.recommendation.id)}
           >
-            See matching doctors →
+            See matching doctors
+            <Icon name="arrowRight" size={18} />
           </button>
         </Card>
       )}
@@ -343,8 +344,8 @@ export function Imaging() {
               </div>
 
               {selected.analysis.is_uncertain && (
-                <div className="rounded-xl bg-orange-50 border border-orange-200 p-3">
-                  <p className="text-sm font-semibold text-orange-900">
+                <div className="sp-notice sp-notice-warn flex-col">
+                  <p className="text-sm font-semibold">
                     Result is uncertain
                   </p>
                   <p className="text-sm text-ink-700 mt-0.5">
@@ -383,7 +384,8 @@ export function Imaging() {
                     )
                   }
                 >
-                  See matching specialists →
+                  See matching specialists
+                  <Icon name="arrowRight" size={18} />
                 </button>
               )}
             </div>

@@ -199,7 +199,7 @@ export function History() {
                   </p>
                 )}
                 {consultation.follow_up_required && (
-                  <span className="sp-chip bg-purple-100 text-purple-800 mt-2">
+                  <span className="sp-chip sp-chip-programme mt-2">
                     Follow-up {formatDate(consultation.follow_up_date)}
                   </span>
                 )}
@@ -311,9 +311,9 @@ export function Sharing() {
             subtitle={`${relationship.relationship_label} · ${relationship.guardian_email}`}
             action={
               relationship.is_active ? (
-                <span className="sp-chip bg-green-100 text-green-800">Active</span>
+                <span className="sp-chip sp-chip-ok">Active</span>
               ) : (
-                <span className="sp-chip bg-ink-100 text-ink-600">Revoked</span>
+                <span className="sp-chip sp-chip-neutral">Revoked</span>
               )
             }
           >
@@ -448,7 +448,7 @@ export function Notifications() {
                   </p>
                 </div>
                 {notification.priority === "critical" && (
-                  <span className="sp-chip bg-red-100 text-red-800 self-start">
+                  <span className="sp-chip sp-chip-danger self-start">
                     Critical
                   </span>
                 )}

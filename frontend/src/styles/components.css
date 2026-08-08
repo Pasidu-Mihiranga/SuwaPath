@@ -92,6 +92,40 @@
     background: var(--sp-danger-surface);
   }
 
+  /* Solid tone buttons: single strong colour, white text. Used where a status
+     colour must read as an action (elderly check-in / medication buttons)
+     rather than as the outlined .sp-btn-danger confirmation style above. */
+  .sp-btn-solid-ok {
+    background: var(--sp-ok-solid);
+    color: #fff;
+  }
+  .sp-btn-solid-ok:hover:not(:disabled) {
+    background: var(--sp-ok-solid-hover);
+  }
+  .sp-btn-solid-warn {
+    background: var(--sp-warn-solid);
+    color: #fff;
+  }
+  .sp-btn-solid-warn:hover:not(:disabled) {
+    background: var(--sp-warn-solid-hover);
+  }
+  .sp-btn-solid-danger {
+    background: var(--sp-danger-solid);
+    color: #fff;
+  }
+  .sp-btn-solid-danger:hover:not(:disabled) {
+    background: var(--sp-danger-solid-hover);
+  }
+  /* Used by the confidential sexual-health pathway to visually distinguish it
+     from the main brand flow, per spec §28's "purple = specialised care". */
+  .sp-btn-solid-programme {
+    background: var(--sp-programme-solid);
+    color: #fff;
+  }
+  .sp-btn-solid-programme:hover:not(:disabled) {
+    background: var(--sp-programme-solid-hover);
+  }
+
   .sp-btn-sm {
     height: calc(var(--sp-control-h) - 0.5rem);
     padding-inline: 0.75rem;

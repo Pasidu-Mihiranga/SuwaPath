@@ -114,7 +114,7 @@ export function Card({
   return (
     <section className={`sp-card ${className}`}>
       {(title || action) && (
-        <header className="flex items-start justify-between gap-3 p-4 sm:p-5 pb-0 sm:pb-0">
+        <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 p-4 sm:p-5 pb-0 sm:pb-0">
           <div className="flex items-start gap-2.5 min-w-0">
             {icon && (
               <span className="sp-icon-tile bg-brand-50 text-brand-700 !h-8 !w-8">
@@ -122,8 +122,11 @@ export function Card({
               </span>
             )}
             <div className="min-w-0">
+              {/* Titles wrap rather than ellipsize: a card header is short on
+                  space in a multi-column grid, and a truncated heading reads
+                  worse than one that wraps to a second line. */}
               {title && (
-                <h2 className="font-semibold text-ink-900 text-base truncate">
+                <h2 className="font-semibold text-ink-900 text-base leading-snug">
                   {title}
                 </h2>
               )}
@@ -174,8 +177,11 @@ export function Stat({
           </span>
         )}
       </div>
+      {/* Wraps rather than ellipsizing: KPI values are usually a short
+          number, but a few (e.g. a specialty name) run long, and an
+          unreadable "Endocr…" is worse than a tile that grows a line. */}
       <p
-        className="text-xl sm:text-2xl font-bold text-ink-900 mt-1.5 truncate"
+        className="text-xl sm:text-2xl font-bold text-ink-900 mt-1.5 leading-tight break-words"
         title={typeof value === "string" ? value : undefined}
       >
         {value}

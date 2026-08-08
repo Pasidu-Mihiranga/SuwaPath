@@ -37,16 +37,16 @@ export const chartColors = {
     return cssVar("--sp-danger-text", "#912018");
   },
   get dangerSolid() {
-    return "#e5484d";
+    return cssVar("--sp-danger-solid", "#dc2626");
   },
   get warn() {
-    return "#f79009";
+    return cssVar("--sp-warn-solid", "#ea580c");
   },
   get ok() {
-    return "#12b76a";
+    return cssVar("--sp-ok-solid", "#16a34a");
   },
   get programme() {
-    return "#7c5cff";
+    return cssVar("--sp-programme-solid", "#7c5cff");
   },
 };
 

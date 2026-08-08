@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Brand, Card, ErrorNote, Icon, Spinner, UrgencyBadge } from "../components/ui";
+import { Brand, Card, Chip, ErrorNote, Icon, Spinner, UrgencyBadge } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
 
 /** Confidential mode runs entirely outside the authenticated app: no account,
@@ -91,7 +91,7 @@ export default function Confidential() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-purple-50 to-ink-50">
+    <div className="min-h-screen bg-gradient-to-b from-programme-surface to-canvas">
       <header className="border-b border-ink-100 bg-white/80 backdrop-blur">
         <div className="max-w-3xl mx-auto flex items-center justify-between px-4 py-3">
           <Brand />
@@ -149,7 +149,7 @@ export default function Confidential() {
 
               <ErrorNote message={error} />
               <button
-                className="sp-btn sp-btn-primary w-full mt-6 bg-purple-600 hover:bg-purple-700"
+                className="sp-btn sp-btn-solid-programme w-full mt-6"
                 onClick={() => void start()}
                 disabled={busy}
               >
@@ -178,8 +178,8 @@ export default function Confidential() {
         ) : stage === "questions" ? (
           <>
             {session?.recovery_code && (
-              <div className="rounded-2xl border-2 border-purple-300 bg-purple-50 p-5">
-                <p className="font-bold text-purple-900">
+              <div className="rounded-2xl border-2 border-programme-border bg-programme-surface p-5">
+                <p className="font-bold text-programme-text">
                   Save your recovery code now
                 </p>
                 <p className="text-2xl font-mono font-bold text-ink-900 mt-2 tracking-wider">
@@ -221,8 +221,8 @@ export default function Confidential() {
                             }
                             className={`rounded-xl border px-3.5 py-2 text-sm transition ${
                               selected
-                                ? "border-purple-500 bg-purple-100 text-purple-900 font-medium"
-                                : "border-ink-200 text-ink-600 hover:border-purple-300"
+                                ? "border-programme-border bg-programme-surface text-programme-text font-medium"
+                                : "border-ink-200 text-ink-600 hover:border-programme-border"
                             }`}
                           >
                             {option}
@@ -236,7 +236,7 @@ export default function Confidential() {
 
               <ErrorNote message={error} />
               <button
-                className="sp-btn sp-btn-primary w-full mt-6 bg-purple-600 hover:bg-purple-700"
+                className="sp-btn sp-btn-solid-programme w-full mt-6"
                 onClick={() => void submit()}
                 disabled={busy || Object.keys(answers).length === 0}
               >
@@ -294,9 +294,7 @@ export default function Confidential() {
                           </p>
                         </div>
                         {facility.offers_confidential_testing && (
-                          <span className="sp-chip bg-purple-100 text-purple-800">
-                            Confidential testing
-                          </span>
+                          <Chip tone="programme">Confidential testing</Chip>
                         )}
                       </div>
                       <p className="text-sm text-ink-600 mt-2">
@@ -326,7 +324,7 @@ export default function Confidential() {
                   connected to any SuwaPath account.
                 </p>
                 <button
-                  className="btn w-full border border-red-300 text-red-700 hover:bg-red-50 px-4 py-2.5"
+                  className="sp-btn sp-btn-danger sp-btn-block"
                   onClick={() => void deleteSession()}
                   disabled={busy}
                 >

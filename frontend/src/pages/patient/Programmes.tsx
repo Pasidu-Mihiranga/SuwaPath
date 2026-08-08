@@ -122,7 +122,7 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
       <div className="sp-card sp-gradient-maternal p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <p className="text-sm text-pink-800 font-semibold">
+            <p className="text-sm text-maternal-text font-semibold">
               {data.is_postpartum ? "Postpartum & Newborn Care" : "Maternal Care"}
             </p>
             {!data.is_postpartum ? (
@@ -148,10 +148,10 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
           </div>
           <div className="flex gap-2 flex-wrap">
             {data.is_high_risk && (
-              <span className="sp-chip bg-orange-100 text-orange-800">High risk</span>
+              <span className="sp-chip sp-chip-warn">High risk</span>
             )}
             {data.risk_conditions?.map((condition: string) => (
-              <span key={condition} className="sp-chip bg-purple-100 text-purple-800">
+              <span key={condition} className="sp-chip sp-chip-programme">
                 {condition}
               </span>
             ))}
@@ -159,7 +159,7 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
         </div>
 
         {data.upcoming_milestone && (
-          <div className="mt-4 rounded-xl bg-white border border-pink-200 p-3">
+          <div className="mt-4 rounded-xl bg-surface border border-maternal-border p-3">
             <p className="text-xs text-ink-500">Upcoming</p>
             <p className="font-semibold text-ink-900">
               {data.upcoming_milestone.label}
@@ -194,8 +194,8 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
               message={result.escalation_message}
             />
             {!result.triggered_alert && (
-              <div className="rounded-xl bg-green-50 border border-green-200 p-4">
-                <p className="font-semibold text-green-900">Check-in recorded</p>
+              <div className="sp-notice sp-notice-ok flex-col">
+                <p className="font-semibold">Check-in recorded</p>
                 <p className="text-sm text-ink-700 mt-0.5">
                   No danger signs reported. Keep monitoring how you feel.
                 </p>
@@ -219,13 +219,13 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
                   key={question.code}
                   className={`flex items-center gap-3 rounded-xl border p-3.5 cursor-pointer transition ${
                     answers[question.code]
-                      ? "border-red-300 bg-red-50"
+                      ? "border-danger-border bg-danger-surface"
                       : "border-ink-200 hover:border-brand-400"
                   }`}
                 >
                   <input
                     type="checkbox"
-                    className="h-5 w-5 accent-red-600"
+                    className="h-5 w-5 accent-danger-solid"
                     checked={Boolean(answers[question.code])}
                     onChange={(event) =>
                       setAnswers((previous) => ({
@@ -258,7 +258,7 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
                 key={index}
                 className={`shrink-0 rounded-xl border p-3 text-center min-w-[92px] ${
                   entry.is_abnormal
-                    ? "border-orange-300 bg-orange-50"
+                    ? "border-warn-border bg-warn-surface"
                     : "border-ink-200"
                 }`}
               >
@@ -337,15 +337,15 @@ function ElderlyPanel({
     <div className="space-y-4">
       <Card title="How are you feeling today?">
         {message && (
-          <div className="rounded-xl bg-green-50 border border-green-200 p-4 mb-4">
-            <p className="text-ink-800">{message}</p>
+          <div className="sp-notice sp-notice-ok mb-4">
+            <p>{message}</p>
           </div>
         )}
         <div className="grid sm:grid-cols-3 gap-3">
           {[
-            { key: "good", label: "GOOD", icon: "circleCheck" as IconName, tone: "bg-green-100 hover:bg-green-200 text-green-900 border-green-300" },
-            { key: "not_great", label: "NOT GREAT", icon: "warning" as IconName, tone: "bg-orange-100 hover:bg-orange-200 text-orange-900 border-orange-300" },
-            { key: "need_help", label: "NEED HELP", icon: "emergency" as IconName, tone: "bg-red-100 hover:bg-red-200 text-red-900 border-red-300" },
+            { key: "good", label: "GOOD", icon: "circleCheck" as IconName, tone: "bg-ok-surface hover:bg-ok-border text-ok-text border-ok-border" },
+            { key: "not_great", label: "NOT GREAT", icon: "warning" as IconName, tone: "bg-warn-surface hover:bg-warn-border text-warn-text border-warn-border" },
+            { key: "need_help", label: "NEED HELP", icon: "emergency" as IconName, tone: "bg-danger-surface hover:bg-danger-border text-danger-text border-danger-border" },
           ].map((option) => (
             <button
               key={option.key}
@@ -381,16 +381,16 @@ function ElderlyPanel({
                     <p className="text-ink-600">{medication.frequency_label}</p>
                   </div>
                   {medication.consecutive_missed >= 2 && (
-                    <span className="sp-chip bg-red-100 text-red-800">
+                    <span className="sp-chip sp-chip-danger">
                       {medication.consecutive_missed} doses missed
                     </span>
                   )}
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   {[
-                    { key: "taken", label: "TAKEN", tone: "bg-green-600 hover:bg-green-700 text-white" },
+                    { key: "taken", label: "TAKEN", tone: "sp-btn-solid-ok" },
                     { key: "skipped", label: "SKIPPED", tone: "bg-ink-200 hover:bg-ink-300 text-ink-800" },
-                    { key: "snoozed", label: "REMIND LATER", tone: "bg-orange-500 hover:bg-orange-600 text-white" },
+                    { key: "snoozed", label: "REMIND LATER", tone: "sp-btn-solid-warn" },
                   ].map((action) => (
                     <button
                       key={action.key}
@@ -424,8 +424,8 @@ function ElderlyPanel({
           />
         </div>
         {data.consecutive_missed_checkins >= 2 && (
-          <div className="mt-4 rounded-xl bg-orange-50 border border-orange-200 p-3">
-            <p className="text-sm text-orange-900">
+          <div className="sp-notice sp-notice-warn mt-4">
+            <p>
               {data.consecutive_missed_checkins} check-ins missed. Your family
               contacts may have been notified.
             </p>

@@ -108,8 +108,8 @@ export default function PatientDashboard() {
                 <UrgencyBadge urgency={recommendation.urgency} />
               </div>
               <p className="text-sm text-ink-600">{recommendation.reason}</p>
-              <div className="rounded-xl bg-orange-50 border border-orange-200 p-3">
-                <p className="text-xs font-semibold text-orange-900">
+              <div className="sp-notice sp-notice-warn flex-col !p-3">
+                <p className="text-xs font-semibold">
                   Suggested next step
                 </p>
                 <p className="text-sm text-ink-700 mt-0.5">
@@ -345,7 +345,7 @@ export default function PatientDashboard() {
                   </p>
                 </div>
                 {medication.is_critical && (
-                  <span className="sp-chip bg-orange-100 text-orange-800">Critical</span>
+                  <span className="sp-chip sp-chip-warn">Critical</span>
                 )}
               </div>
             ))}

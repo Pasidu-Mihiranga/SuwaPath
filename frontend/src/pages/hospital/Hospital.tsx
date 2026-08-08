@@ -133,20 +133,24 @@ export function HospitalDashboard() {
       </div>
 
       {data.capacity_warnings?.length > 0 && (
-        <div className="rounded-2xl border border-orange-300 bg-orange-50 p-4">
-          <p className="font-bold text-orange-900">
+        <div className="sp-notice sp-notice-warn flex-col items-stretch">
+          <p className="font-bold">
             Predicted demand exceeds capacity in {data.capacity_warnings.length}{" "}
             specialty(ies)
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
+          {/* A data sentence, not a status label, so it wraps onto multiple
+              lines on narrow screens rather than using the nowrap chip style. */}
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
             {data.capacity_warnings.map((warning: any) => (
-              <span
+              <div
                 key={warning.specialty_code}
-                className="sp-chip bg-white border border-orange-300 text-orange-900"
+                className="rounded-lg bg-surface border border-warn-border px-3 py-2 text-sm"
               >
-                {titleCase(warning.specialty_code)}: {warning.predicted_total} predicted
-                vs {warning.capacity_total} capacity ({warning.utilisation_percent}%)
-              </span>
+                <span className="font-semibold">{titleCase(warning.specialty_code)}</span>
+                {": "}
+                {warning.predicted_total} predicted vs {warning.capacity_total}{" "}
+                capacity ({warning.utilisation_percent}%)
+              </div>
             ))}
           </div>
         </div>
@@ -268,7 +272,7 @@ export function HospitalDashboard() {
                   </div>
                   <div className="mt-1 h-1.5 rounded-full bg-ink-100 overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-purple-500"
+                      className="h-full rounded-full bg-programme-solid"
                       style={{ width: `${programme.share_percent}%` }}
                     />
                   </div>
@@ -312,8 +316,8 @@ export function Forecast() {
       </header>
 
       {data?.by_specialty?.warnings?.length > 0 && (
-        <div className="rounded-2xl border border-red-300 bg-red-50 p-4">
-          <p className="font-bold text-red-900">Capacity warnings</p>
+        <div className="rounded-2xl border border-danger-border bg-danger-surface p-4">
+          <p className="font-bold text-danger-text">Capacity warnings</p>
           <ul className="mt-2 space-y-1 text-sm text-ink-700">
             {data.by_specialty.warnings.map((warning: any) => (
               <li key={warning.specialty_code}>
@@ -333,9 +337,9 @@ export function Forecast() {
             title={titleCase(specialty.specialty_code)}
             action={
               specialty.capacity_warning ? (
-                <span className="sp-chip bg-red-100 text-red-800">Over capacity</span>
+                <span className="sp-chip sp-chip-danger">Over capacity</span>
               ) : (
-                <span className="sp-chip bg-green-100 text-green-800">
+                <span className="sp-chip sp-chip-ok">
                   {specialty.utilisation_percent}% used
                 </span>
               )
@@ -449,8 +453,8 @@ export function NoShow() {
       </div>
 
       {data.tomorrow_high_risk_count > 0 && (
-        <div className="rounded-2xl border border-orange-300 bg-orange-50 p-4">
-          <p className="font-bold text-orange-900">
+        <div className="sp-notice sp-notice-warn flex-col">
+          <p className="font-bold">
             Tomorrow: {data.tomorrow_high_risk_count} high-risk appointments
           </p>
           <p className="text-sm text-ink-700 mt-1">
@@ -583,7 +587,7 @@ export function Capacity() {
                 </span>
                 <span
                   className={`font-semibold ${
-                    specialty.capacity_warning ? "text-red-700" : "text-ink-700"
+                    specialty.capacity_warning ? "text-danger-text" : "text-ink-700"
                   }`}
                 >
                   {specialty.booked} / {specialty.weekly_capacity} (
@@ -594,9 +598,9 @@ export function Capacity() {
                 <div
                   className={`h-full rounded-full ${
                     specialty.utilisation_percent > 90
-                      ? "bg-red-500"
+                      ? "bg-danger-solid"
                       : specialty.utilisation_percent > 70
-                        ? "bg-orange-500"
+                        ? "bg-warn-solid"
                         : "bg-brand-500"
                   }`}
                   style={{

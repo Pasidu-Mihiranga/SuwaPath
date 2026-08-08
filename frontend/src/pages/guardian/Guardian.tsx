@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Card,
+  Chip,
   Empty,
   Icon,
   Spinner,
@@ -11,12 +12,15 @@ import {
   relativeDay,
 } from "../../components/ui";
 import { api } from "../../lib/api";
+import type { Tone } from "../../styles/theme";
 
-const TONE: Record<string, string> = {
-  urgent: "bg-red-100 text-red-800",
-  attention: "bg-orange-100 text-orange-800",
-  programme: "bg-purple-100 text-purple-800",
-  normal: "bg-green-100 text-green-800",
+// The dependent-card status is computed server-side as one of these labels,
+// distinct from the appointment/urgency vocabulary toneFor() already covers.
+const DEPENDENT_STATUS_TONE: Record<string, Tone> = {
+  urgent: "danger",
+  attention: "warn",
+  programme: "programme",
+  normal: "ok",
 };
 
 /* ------------------------------------------------------------ Dependents */
@@ -70,23 +74,23 @@ export function Dependents() {
                   </div>
                 </div>
                 {dependent.unread_alerts > 0 && (
-                  <span className="sp-chip bg-red-100 text-red-800">
+                  <Chip tone="danger">
                     {dependent.unread_alerts} alert
                     {dependent.unread_alerts > 1 ? "s" : ""}
-                  </span>
+                  </Chip>
                 )}
               </div>
 
               {dependent.care_programme && (
-                <span className="sp-chip bg-purple-100 text-purple-800 mt-3">
+                <Chip tone="programme" className="mt-3">
                   {dependent.care_programme}
-                </span>
+                </Chip>
               )}
 
               <div className="mt-3 flex items-center justify-between">
-                <span className={`sp-chip ${TONE[dependent.status_tone] ?? TONE.normal}`}>
+                <Chip tone={DEPENDENT_STATUS_TONE[dependent.status_tone] ?? "ok"}>
                   {dependent.status_label}
-                </span>
+                </Chip>
                 <span className="text-xs text-ink-500">
                   {dependent.granted_permissions.length} permission
                   {dependent.granted_permissions.length === 1 ? "" : "s"}
@@ -121,8 +125,9 @@ export function DependentDetail() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link to="/guardian" className="text-sm text-brand-700 hover:underline">
-            ← All dependents
+          <Link to="/guardian" className="inline-flex items-center gap-1 text-sm text-brand-700 hover:underline">
+            <Icon name="chevronLeft" size={16} />
+            All dependents
           </Link>
           <h1 className="text-2xl font-bold text-ink-900 mt-1">{data.name}</h1>
           <p className="text-ink-500">
@@ -192,20 +197,14 @@ export function DependentDetail() {
                   </div>
                   <div className="flex items-center gap-2">
                     {medication.consecutive_missed >= 2 && (
-                      <span className="sp-chip bg-red-100 text-red-800">
+                      <Chip tone="danger">
                         {medication.consecutive_missed} missed
-                      </span>
+                      </Chip>
                     )}
                     {medication.adherence_percent_14d != null && (
-                      <span
-                        className={`sp-chip ${
-                          medication.adherence_percent_14d >= 80
-                            ? "bg-green-100 text-green-800"
-                            : "bg-orange-100 text-orange-800"
-                        }`}
-                      >
+                      <Chip tone={medication.adherence_percent_14d >= 80 ? "ok" : "warn"}>
                         {medication.adherence_percent_14d}% adherence
-                      </span>
+                      </Chip>
                     )}
                   </div>
                 </div>
@@ -259,9 +258,9 @@ export function DependentDetail() {
                   key={index}
                   className={`shrink-0 rounded-xl border p-3 text-center min-w-[96px] ${
                     entry.triggered_alert
-                      ? "border-red-300 bg-red-50"
+                      ? "border-danger-border bg-danger-surface"
                       : entry.wellbeing === "good"
-                        ? "border-green-200 bg-green-50"
+                        ? "border-ok-border bg-ok-surface"
                         : "border-ink-200"
                   }`}
                 >
@@ -362,9 +361,9 @@ export function Alerts() {
               key={alert.id}
               className={`sp-card p-5 border-l-4 ${
                 alert.severity === "critical"
-                  ? "border-l-red-500"
+                  ? "border-l-danger-solid"
                   : alert.severity === "attention"
-                    ? "border-l-orange-500"
+                    ? "border-l-warn-solid"
                     : "border-l-brand-500"
               } ${alert.is_acknowledged ? "opacity-60" : ""}`}
             >

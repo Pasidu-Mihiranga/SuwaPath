@@ -257,8 +257,8 @@ export default function SymptomCheck() {
             </div>
 
             {redFlags?.triggered_rules?.length > 0 && (
-              <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
-                <p className="font-semibold text-red-900 text-sm">
+              <div className="mt-5 rounded-xl border border-danger-border bg-danger-surface p-4">
+                <p className="font-semibold text-danger-text text-sm">
                   Clinical warning patterns detected
                 </p>
                 <ul className="mt-2 space-y-2">
@@ -274,7 +274,7 @@ export default function SymptomCheck() {
                     </li>
                   ))}
                 </ul>
-                <p className="text-xs text-red-800 mt-3">
+                <p className="text-xs text-danger-text mt-3">
                   Detected by SuwaPath's clinician-defined rule engine, not by
                   the language model.
                 </p>
@@ -342,7 +342,8 @@ export default function SymptomCheck() {
                 )
               }
             >
-              See matching doctors & hospitals →
+              See matching doctors & hospitals
+              <Icon name="arrowRight" size={18} />
             </button>
             <AiNotice>
               SuwaPath provides care navigation and screening support. A

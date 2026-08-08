@@ -66,6 +66,18 @@
   --sp-maternal-border: #fbcfe8;
   --sp-maternal-text: #9d174d;
 
+  /* Solid action colours: for buttons that must read as a single strong
+     colour rather than the tinted surface/border/text triads above — the
+     elderly-pathway jumbo buttons (spec §14) are the main consumer. */
+  --sp-ok-solid: #16a34a;
+  --sp-ok-solid-hover: #15803d;
+  --sp-warn-solid: #ea580c;
+  --sp-warn-solid-hover: #c2410c;
+  --sp-danger-solid: #dc2626;
+  --sp-danger-solid-hover: #b91c1c;
+  --sp-programme-solid: #7c5cff;
+  --sp-programme-solid-hover: #6941c6;
+
   /* ------------------------------------------------------------ surfaces */
   --sp-canvas: #f7f9fc;
   --sp-surface: #ffffff;
