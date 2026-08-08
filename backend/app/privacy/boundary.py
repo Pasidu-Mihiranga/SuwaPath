@@ -75,7 +75,7 @@ LOCAL_ONLY_CAPABILITIES = frozenset({
 # listed is stripped before the prompt is built — an allowlist, so a new
 # field added to a model is private by default rather than leaking silently.
 ROUTE_FIELDS: dict[str, frozenset[str]] = {
-    "clinical": frozenset({
+    "consult": frozenset({
         "age_band", "sex", "is_pregnant", "pregnancy_week", "chronic_conditions",
         "allergies", "current_medications", "symptoms", "duration_text",
         "severity", "chief_complaint", "negative_findings",
@@ -93,8 +93,19 @@ ROUTE_FIELDS: dict[str, frozenset[str]] = {
     "knowledge": frozenset({
         "age_band", "sex", "is_pregnant", "question",
     }),
+    # Web search leaves our infrastructure entirely and is logged by a third
+    # party indefinitely, so it is the most restricted route of all: the
+    # search topic and nothing else.
+    "web": frozenset({"question"}),
     "direct": frozenset({
         "age_band", "preferred_language",
+    }),
+    # Retained so a stale caller using the old route name still gets the same
+    # allowlist rather than silently falling back to "direct".
+    "clinical": frozenset({
+        "age_band", "sex", "is_pregnant", "pregnancy_week", "chronic_conditions",
+        "allergies", "current_medications", "symptoms", "duration_text",
+        "severity", "chief_complaint", "negative_findings",
     }),
 }
 

@@ -162,24 +162,172 @@ lighter information density and role-specific responsive layouts.
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph clients["Five roles, one workflow"]
+        P["Patient"]:::role
+        G["Guardian"]:::role
+        D["Doctor"]:::role
+        H["Hospital admin"]:::role
+        S["System admin"]:::role
+    end
+
+    UI["React 19 - Vite - Tailwind<br/>responsive web, installable PWA"]:::ui
+    API["FastAPI - JWT - RBAC<br/>REST API"]:::api
+
+    subgraph brains["Processing"]
+        AG["LangGraph agent<br/>parallel fan-out"]:::ai
+        CE["Clinical engines<br/>red flag - navigation - matching"]:::det
+        DOC["Document pipeline<br/>PyMuPDF + Tesseract"]:::det
+        CV["Vision adapters<br/>ONNX, baseline fallback"]:::det
+        AN["Analytics<br/>no-show - demand"]:::det
+    end
+
+    PHI{{"PHI boundary<br/>minimise - pseudonymise - guard"}}:::guard
+    LLM["Google Gemini"]:::ext
+
+    PG[("PostgreSQL<br/>41 tables")]:::store
+    QD[("Qdrant + MiniLM<br/>knowledge vectors")]:::store
+
+    P --> UI
+    G --> UI
+    D --> UI
+    H --> UI
+    S --> UI
+    UI --> API
+    API --> AG
+    API --> CE
+    API --> DOC
+    API --> CV
+    API --> AN
+    AG --> PHI
+    PHI --> LLM
+    CE --> PG
+    DOC --> PG
+    CV --> PG
+    AN --> PG
+    AG --> PG
+    AG --> QD
+
+    classDef role fill:#ecfdff,stroke:#0090b0,color:#0a2e56
+    classDef ui fill:#cef7fd,stroke:#0090b0,color:#0a2e56
+    classDef api fill:#0090b0,stroke:#0a7490,color:#ffffff
+    classDef ai fill:#f6f4ff,stroke:#7c5cff,color:#5b21b6
+    classDef det fill:#ecfdf3,stroke:#16a34a,color:#05603a
+    classDef guard fill:#fff6ea,stroke:#ea580c,color:#93370d
+    classDef ext fill:#fef3f2,stroke:#dc2626,color:#912018
+    classDef store fill:#f2f6fb,stroke:#4a75a3,color:#0a2e56
 ```
-   Patient · Guardian · Doctor · Hospital admin · System admin
-                            │
-              React + Vite + TypeScript + Tailwind (PWA)
-                            │  REST · JWT · RBAC
-                    FastAPI  —  100 routes
-                            │
-   ┌────────────────┬───────┴────────┬────────────────┬──────────────┐
-   │  LangGraph     │  Deterministic │   Document     │   Vision     │
-   │  orchestration │  clinical      │   pipeline     │   adapters   │
-   │  (Gemini)      │  engines       │   PyMuPDF +    │   ONNX ⇢     │
-   │                │  red-flag ·    │   Tesseract    │   baseline   │
-   │                │  navigation ·  │                │              │
-   │                │  matching      │                │              │
-   └────────────────┴────────────────┴────────────────┴──────────────┘
-                            │
-        PostgreSQL (41 tables)   ·   Qdrant + MiniLM (knowledge)
+
+The green nodes never call a hosted model. Everything clinically decisive —
+urgency, provider ranking, lab flagging, image inference — is computed locally
+and deterministically. The language model handles language, not judgement.
+
+### The agent graph
+
+```mermaid
+flowchart LR
+    START(( )) --> GI["guard_input<br/>deterministic"]:::det
+    GI -->|blocked or crisis| E1(("end")):::stop
+    GI --> R["route<br/>multi-intent"]:::ai
+    R --> FAN{{"fan-out<br/>Send()"}}:::ai
+
+    FAN --> CA["clinical_agent"]:::ai
+    FAN --> AA["admin_agent"]:::ai
+    FAN --> RA["records_agent"]:::ai
+    FAN --> KA["knowledge_agent"]:::ai
+    FAN --> DA["direct_agent"]:::ai
+
+    CA --> M["merge<br/>operator.add fan-in"]:::ai
+    AA --> M
+    RA --> M
+    KA --> M
+    DA --> M
+    M --> J["judge<br/>deterministic"]:::det
+    J --> E2(("end")):::stop
+
+    classDef det fill:#ecfdf3,stroke:#16a34a,color:#05603a
+    classDef ai fill:#f6f4ff,stroke:#7c5cff,color:#5b21b6
+    classDef stop fill:#f2f6fb,stroke:#4a75a3,color:#0a2e56
 ```
+
+"Is my appointment still on, and what did my blood test mean?" is two
+questions. The router splits it and `Send()` dispatches both agents in one
+superstep, so they run at the same time rather than one after the other. Each
+returns a single-element list and the `operator.add` reducer on `agent_outputs`
+concatenates them on fan-in — without that reducer the concurrent writes would
+conflict and one agent's work would be dropped silently.
+
+The router falls back to deterministic multi-intent keyword splitting when the
+model is unavailable, so fan-out still happens with zero API quota.
+
+`judge` may soften or block an answer. It can never raise urgency — that stays
+with the deterministic red-flag engine. If a judge could escalate, a prompt
+injection would become a way to manufacture emergencies.
+
+### What crosses the PHI boundary
+
+Masking alone is not an answer. `app/privacy/boundary.py` applies four layers,
+in order, and the earlier ones do most of the work:
+
+```mermaid
+flowchart LR
+    DB[("Patient record")]:::store --> MIN["1 - Minimise<br/>per-route field allowlist<br/>age becomes an age band"]:::guard
+    MIN --> LOCAL{"local-only<br/>capability?"}:::guard
+    LOCAL -->|"red flags - OCR<br/>imaging - confidential"| NEVER["never leaves<br/>this machine"]:::det
+    LOCAL -->|no| PSE["2 - Pseudonymise<br/>names become PERSON_A7"]:::guard
+    PSE --> EG["3 - Egress guard<br/>block on any identifier"]:::guard
+    EG -->|pass| LLM["Gemini"]:::ext
+    EG -->|fail| BLOCK["blocked and audited"]:::stop
+    LLM --> RE["4 - Rehydrate + judge<br/>names restored locally"]:::guard
+    RE --> USER["Patient"]:::role
+
+    classDef store fill:#f2f6fb,stroke:#4a75a3,color:#0a2e56
+    classDef guard fill:#fff6ea,stroke:#ea580c,color:#93370d
+    classDef det fill:#ecfdf3,stroke:#16a34a,color:#05603a
+    classDef ext fill:#fef3f2,stroke:#dc2626,color:#912018
+    classDef stop fill:#fef3f2,stroke:#dc2626,color:#912018
+    classDef role fill:#ecfdff,stroke:#0090b0,color:#0a2e56
+```
+
+A worked example, taken from the module's own check:
+
+| Stage | Value |
+| --- | --- |
+| Record | `age: 34, full_name, email, latitude, symptoms: ["chest pain"]` |
+| After minimise (`clinical` route) | `age_band: "adult_18_39", symptoms: ["chest pain"]` |
+| Stripped | `full_name`, `email`, `latitude` |
+| Egress guard | blocks the payload outright if an email or NIC survives |
+
+Consent is enforced in the **database query**, not in the prompt. A guardian
+asking the same question about two dependents gets two different answers
+because the tool never reads what was not shared — the model is never in a
+position to be talked out of it.
+
+### The shared care journey
+
+```mermaid
+flowchart LR
+    A["Symptom - report - image"]:::role --> B["Structured intake"]:::det
+    B --> C{"Red-flag<br/>assessment"}:::det
+    C -->|emergency| E["Emergency-capable<br/>facility"]:::stop
+    C -->|routine or urgent| F["Specialty<br/>recommendation"]:::det
+    F --> G["Capability-aware<br/>provider match"]:::det
+    G --> H["Appointment"]:::ui
+    H --> I["Doctor pre-consult<br/>summary"]:::ui
+    I --> J["Consultation"]:::ui
+    J --> K["Follow-up and<br/>care programme"]:::ui
+    H -.->|same row| L["Hospital demand and<br/>no-show analytics"]:::ui
+
+    classDef role fill:#ecfdff,stroke:#0090b0,color:#0a2e56
+    classDef det fill:#ecfdf3,stroke:#16a34a,color:#05603a
+    classDef ui fill:#cef7fd,stroke:#0090b0,color:#0a2e56
+    classDef stop fill:#fef3f2,stroke:#dc2626,color:#912018
+```
+
+One `Appointment` row is what the patient books, what appears in the doctor's
+live queue, and what the hospital counts in its forecast. It is one workflow
+seen from five angles — not five disconnected dashboards.
 
 ---
 

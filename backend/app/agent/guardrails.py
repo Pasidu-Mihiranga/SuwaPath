@@ -60,18 +60,99 @@ _INJECTION_PATTERNS = [
     ("developer_mode", re.compile(r"developer\s+mode|god\s+mode|sudo\s+mode", re.I)),
     ("exfiltrate", re.compile(
         r"(list|dump|show)\s+(all\s+)?(patients|users|records|database)", re.I)),
+    # The standard framings used to talk a medical model past its own limits.
+    ("pretext", re.compile(
+        r"\b(for\s+(educational|research|academic)\s+purposes|hypothetically|"
+        r"in\s+a\s+fictional|pretend\s+(you|that)|as\s+a\s+doctor,?\s+(you\s+)?(would|tell))\b",
+        re.I)),
+    ("safety_override", re.compile(
+        r"\b(without\s+(any\s+)?(warnings?|disclaimers?|caveats?)|"
+        r"don'?t\s+(tell|warn|say)\s+me\s+to\s+see\s+a\s+doctor|"
+        r"no\s+need\s+to\s+see\s+a\s+doctor)\b", re.I)),
 ]
 
 # Requests SuwaPath must refuse regardless of phrasing: it navigates care, it
 # does not prescribe. Getting a dose wrong is a different class of harm from
 # getting a specialty wrong.
+#
+# These are grouped by the *kind* of refusal so the reply can name the reason
+# rather than emitting one generic paragraph for everything.
 _OUT_OF_SCOPE_PATTERNS = [
     ("prescribe", re.compile(
-        r"(prescribe|give\s+me\s+a\s+prescription|what\s+dose\s+(should|do)\s+i\s+take)", re.I)),
-    ("dosage", re.compile(r"how\s+many\s+(mg|tablets|pills)\s+(should|can)\s+i", re.I)),
+        r"(prescribe|give\s+me\s+a\s+prescription|"
+        r"what\s+(dose|dosage|medicine|medication|drug|tablet)s?\s+(should|do|can)\s+i|"
+        r"which\s+(medicine|medication|antibiotic|drug|tablet)s?\s+(should|do|can)\s+i)", re.I)),
+    ("dosage", re.compile(
+        r"how\s+(many|much)\s+(mg|ml|tablets?|pills?|capsules?|drops?|\w+)\s+(should|can|do)\s+i"
+        r"|\bdosage\s+(for|of)\b", re.I)),
+    # Route of administration. "How do I inject X" is not a dosage question and
+    # slipped past the dosage rule entirely; self-administering an injection is
+    # a far worse outcome than an over-the-counter mistake.
+    ("administration_route", re.compile(
+        r"\bhow\s+(to|do|can)\s+(i\s+)?(inject|administer|self-?medicate|"
+        r"take|use|apply|insert|dissolve)\b.{0,40}\b"
+        r"(injection|syringe|needle|iv|drip|cannula|vein|muscle|suppositor)"
+        r"|\b(inject|injecting)\b.{0,30}\b(myself|at\s+home|paracetamol|panadol|"
+        r"antibiotic|insulin|saline)\b", re.I)),
+    ("procedure_at_home", re.compile(
+        r"\b(how\s+to|can\s+i)\b.{0,30}\b(stitch|suture|drain|lance|remove)\b"
+        r".{0,25}\b(myself|at\s+home|wound|abscess|cyst)\b"
+        r"|\b(home|diy)\s+(abortion|surgery|stitches)\b", re.I)),
     ("diagnose_definitive", re.compile(
-        r"(do\s+i\s+definitely\s+have|diagnose\s+me|confirm\s+i\s+have)", re.I)),
+        r"(do\s+i\s+definitely\s+have|diagnose\s+me|confirm\s+i\s+have|"
+        r"am\s+i\s+definitely\s+\w+|tell\s+me\s+exactly\s+what\s+i\s+have)", re.I)),
 ]
+
+# Each refusal names what SuwaPath *can* do next, because a bare "I can't help
+# with that" reads as a malfunction and pushes people to guess on their own.
+_REFUSAL_BY_RULE: dict[str, str] = {
+    "prescribe": (
+        "**I can't recommend a specific medicine or dose.** Which drug is right "
+        "for you depends on your weight, kidney and liver function, pregnancy "
+        "status and everything else you already take — a pharmacist or doctor "
+        "has to weigh those together.\n\n"
+        "**What I can do instead**\n"
+        "- Explain what your symptoms might point to\n"
+        "- Tell you which kind of doctor to see, and how soon\n"
+        "- Find one near you and book the appointment"
+    ),
+    "dosage": (
+        "**I can't give you a dose.** Dosing errors are one of the most common "
+        "causes of avoidable harm at home, and the safe amount changes with "
+        "age, weight and other medicines.\n\n"
+        "Please check the packet, or ask any pharmacist — they will answer this "
+        "free of charge. **I can help you** understand your symptoms and get "
+        "you to the right doctor."
+    ),
+    "administration_route": (
+        "**I won't explain how to give yourself an injection or any similar "
+        "procedure.** Done outside a clinical setting these carry real risks — "
+        "infection, nerve damage, and getting the drug into the wrong place.\n\n"
+        "If you need an injection, a nurse at any government clinic or private "
+        "channelling centre will do it safely. **I can find one near you.**\n\n"
+        "If this is about pain that oral medicine is not touching, tell me what "
+        "you are feeling and I will help you work out who to see."
+    ),
+    "procedure_at_home": (
+        "**That is not something to do at home.** Please have it looked at "
+        "properly — an OPD or a general practitioner can handle it quickly and "
+        "safely.\n\n**I can find the nearest option and book you in.**"
+    ),
+    "diagnose_definitive": (
+        "**I can't tell you for certain what you have** — and you should be "
+        "sceptical of anything that claims it can without examining you or "
+        "running tests.\n\n"
+        "**What I can do** is talk through your symptoms, explain the "
+        "possibilities that fit, suggest which tests would settle it, and get "
+        "you to a doctor who can confirm."
+    ),
+}
+
+_INJECTION_REFUSAL = (
+    "**That looks like an attempt to change how I work**, so I've left it "
+    "alone.\n\nI'm here for health questions, understanding your reports, and "
+    "finding you care. What did you actually need?"
+)
 
 # Deterministic and first — never gated behind a model call.
 _SELF_HARM_PATTERNS = [
@@ -121,10 +202,7 @@ def check_input(text: str) -> GuardResult:
             result.verdict = GuardVerdict.BLOCK
             result.reasons.append("Message resembles a prompt-injection attempt.")
             result.matched_rules.append(name)
-            result.replacement = (
-                "I can only help with health questions, finding care, and your "
-                "SuwaPath records. Could you rephrase what you need?"
-            )
+            result.replacement = _INJECTION_REFUSAL
             return result
 
     for name, pattern in _OUT_OF_SCOPE_PATTERNS:
@@ -132,7 +210,7 @@ def check_input(text: str) -> GuardResult:
             result.verdict = GuardVerdict.BLOCK
             result.reasons.append("Request is outside SuwaPath's scope.")
             result.matched_rules.append(name)
-            result.replacement = OUT_OF_SCOPE_RESPONSE
+            result.replacement = _REFUSAL_BY_RULE.get(name, OUT_OF_SCOPE_RESPONSE)
             return result
 
     return result

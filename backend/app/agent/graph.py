@@ -31,16 +31,18 @@ from typing import Any, Iterator
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from app.agent import cag, consult
 from app.agent.guardrails import (
     GuardVerdict,
     check_input,
     judge_output,
     judge_summary,
 )
-from app.agent.state import MAX_ROUTES, VALID_ROUTES, AgentState
+from app.agent.state import ROUTE_ALIASES, MAX_ROUTES, VALID_ROUTES, AgentState
 from app.agent.tools import ROUTE_TOOLS, TOOLS, ToolDenied
 from app.privacy.boundary import PHIBoundary, EgressBlocked
 from app.services import ai_orchestrator as ai
+from app.services import llm
 
 logger = logging.getLogger(__name__)
 
@@ -73,16 +75,19 @@ def set_session(db) -> None:  # noqa: ARG001 - kept for call-site compatibility
 ROUTER_PROMPT = """You classify a patient's message for a healthcare assistant.
 
 Available routes:
-- clinical:  symptoms, how they feel, whether something is serious
+- consult:   they are describing how they feel — a symptom, pain, illness,
+             or answering a follow-up question about one
 - admin:     appointments, finding or booking a doctor or hospital
 - records:   their uploaded reports, test results, scans, medications
 - knowledge: general health questions not about their own data
-- direct:    greetings, thanks, chit-chat, anything else
+- web:       something current that a fixed reference cannot know — an
+             outbreak, a recall, this year's guidance, recent news
+- direct:    greetings, thanks, chit-chat, off-topic, anything else
 
 A message may contain SEVERAL independent intents. Return one entry per
 intent, at most {max_routes}. Most messages have exactly one.
 
-Message: "{message}"
+{context}Message: "{message}"
 
 Return JSON only:
 {{"routes": [{{"route": "...", "confidence": 0.0-1.0, "reasoning": "one short line"}}]}}"""
@@ -108,17 +113,68 @@ def guard_input_node(state: AgentState) -> dict:
     return update
 
 
+def cag_node(state: AgentState) -> dict:
+    """Answer greetings and product FAQs from reviewed text, before any model.
+
+    A hit here skips the whole graph. That is the point: these answers should
+    be identical every time, and no clinical question is eligible.
+    """
+    started = time.perf_counter()
+    hit = cag.lookup(
+        state.get("user_text", ""), confidential=bool(state.get("confidential"))
+    )
+
+    if hit is None:
+        return {
+            "cag": {"hit": False},
+            "trace": [{
+                "node": "cache_lookup",
+                "hit": False,
+                "ms": int((time.perf_counter() - started) * 1000),
+                "source": "deterministic",
+            }],
+        }
+
+    return {
+        "answer": hit.answer,
+        "routes": [],
+        "suggestions": hit.suggestions,
+        "cag": {"hit": True, "key": hit.key, "kind": hit.kind, "score": hit.score},
+        "trace": [{
+            "node": "cache_lookup",
+            "hit": True,
+            "key": hit.key,
+            "score": hit.score,
+            "ms": int((time.perf_counter() - started) * 1000),
+            "source": "cache",
+        }],
+    }
+
+
 def route_node(state: AgentState) -> dict:
     """Classify intent, possibly into several parallel routes."""
     message = state.get("user_text", "")
-    prompt = ROUTER_PROMPT.format(message=message, max_routes=MAX_ROUTES)
-    data = ai._parse_json(ai._generate(prompt, temperature=0.0, as_json=True))
+    history = state.get("history") or []
+
+    # Mid-consultation, a bare "3 days" or "it's throbbing" is meaningless in
+    # isolation. The last assistant question is what makes it classifiable.
+    context = ""
+    if history:
+        last = history[-1]
+        if last.get("role") == "assistant":
+            context = f'You previously asked: "{last.get("content", "")[:200]}"\n'
+
+    prompt = ROUTER_PROMPT.format(
+        message=message, max_routes=MAX_ROUTES, context=context
+    )
+    data, completion = llm.complete_json(prompt, temperature=0.0, fast=True)
 
     routes: list[dict] = []
-    source = "gemini"
+    source = completion.provider if completion else "none"
     for entry in (data or {}).get("routes", [])[:MAX_ROUTES]:
-        name = str(entry.get("route", "")).strip()
-        if name in VALID_ROUTES:
+        name = str(entry.get("route", "")).strip().lower()
+        name = ROUTE_ALIASES.get(name, name)
+        if name in VALID_ROUTES and not any(r["route"] == name for r in routes):
             routes.append({
                 "route": name,
                 "confidence": float(entry.get("confidence", 0.5)),
@@ -133,6 +189,19 @@ def route_node(state: AgentState) -> dict:
         source = "keyword_fallback"
         routes = _fallback_routes(message)
 
+    mid_consultation = bool(history) and _awaiting_answer(history)
+
+    # A reply to our own follow-up question always continues the consultation,
+    # whatever the classifier made of the fragment on its own.
+    if mid_consultation and not any(r["route"] == "consult" for r in routes):
+        routes.insert(0, {
+            "route": "consult",
+            "confidence": 0.9,
+            "reasoning": "Continues an open consultation.",
+        })
+
+    routes = _prune_routes(routes, mid_consultation=mid_consultation)
+
     return {
         "routes": routes,
         "routing_source": source,
@@ -141,17 +210,58 @@ def route_node(state: AgentState) -> dict:
             "source": source,
             "routes": [r["route"] for r in routes],
             "multi": len(routes) > 1,
+            "ms": completion.latency_ms if completion else 0,
         }],
     }
 
 
+def _awaiting_answer(history: list[dict]) -> bool:
+    """Did we just ask the patient a question?"""
+    for message in reversed(history):
+        if message.get("role") == "assistant":
+            return message.get("content", "").rstrip().endswith("?")
+    return False
+
+
+def _prune_routes(routes: list[dict], *, mid_consultation: bool) -> list[dict]:
+    """Drop routes that only add noise.
+
+    Classifiers are generous — they will happily return `direct` alongside
+    `consult`, or `records` because the patient's answer mentioned "two days".
+    Every extra route triggers a merge, and merging an empty or irrelevant
+    answer into a good one is how a reply ends up contradicting itself
+    ("your appointment is at 11:30… another source says the date is not
+    available"). Fewer, better-chosen routes beat more of them.
+    """
+    if not routes:
+        return routes
+
+    # `direct` is the catch-all. If anything substantive was also selected,
+    # the catch-all has nothing to contribute.
+    if len(routes) > 1:
+        routes = [r for r in routes if r["route"] != "direct"] or routes[:1]
+
+    # Mid-consultation the patient is answering our question, not opening a
+    # new topic. Pulling their whole record in because they said "two days"
+    # buries the consultation under unrelated lab values.
+    if mid_consultation:
+        consult_only = [r for r in routes if r["route"] == "consult"]
+        if consult_only:
+            return consult_only[:1]
+
+    return routes[:MAX_ROUTES]
+
+
 _FALLBACK_KEYWORDS = [
     ("admin", ("appointment", "book", "booking", "doctor", "hospital",
-               "reschedule", "cancel", "clinic", "specialist")),
+               "reschedule", "cancel", "clinic", "specialist", "channel")),
     ("records", ("report", "result", "scan", "x-ray", "xray", "medication",
                  "blood test", "lab", "prescription", "screening")),
-    ("clinical", ("pain", "fever", "symptom", "hurt", "feel", "sick", "cough",
-                  "dizzy", "headache", "bleeding", "rash", "breath")),
+    ("web", ("outbreak", "latest", "current", "news", "recall", "this year",
+             "right now", "recently", "2025", "2026")),
+    ("consult", ("pain", "fever", "symptom", "hurt", "feel", "sick", "cough",
+                 "dizzy", "headache", "bleeding", "rash", "breath", "ache",
+                 "vomit", "nausea", "swollen", "itch", "tired")),
     ("knowledge", ("what is", "what does", "why does", "how does", "explain",
                    "is it normal", "tell me about")),
 ]
@@ -244,7 +354,7 @@ def _run_agent(state: AgentState, route: str) -> dict:
                 logger.warning("Tool %s failed: %s", tool_name, exc)
                 tool_events.append({"tool": tool_name, "status": "error"})
 
-    answer = _synthesise(state, route, tool_texts)
+    answer, source = _synthesise(state, route, tool_texts)
 
     return {
         "agent_outputs": [{
@@ -256,22 +366,59 @@ def _run_agent(state: AgentState, route: str) -> dict:
         "trace": [{
             "node": f"{route}_agent",
             "tools": tool_events,
+            "source": source,
             "ms": int((time.perf_counter() - started) * 1000),
         }],
     }
 
 
 AGENT_BRIEF = {
-    "clinical": "You explain symptoms and what kind of care they warrant. You never diagnose.",
-    "admin": "You help with appointments and finding the right doctor or facility.",
-    "records": "You explain the patient's own reports and screenings in plain language.",
-    "knowledge": "You answer general health questions using only the reference material.",
-    "direct": "You reply briefly and warmly, and steer back to how SuwaPath can help.",
+    "admin": (
+        "You help with appointments and finding the right doctor or facility. "
+        "Lead with the concrete option — who, where, when — not with an "
+        "explanation of what you are about to do."
+    ),
+    "records": (
+        "You explain the patient's own reports and screenings in plain "
+        "language: what the value means, whether it is outside range, and "
+        "what it does and does not imply. Never speculate beyond the numbers."
+    ),
+    "knowledge": (
+        "You answer general health questions using only the reference "
+        "material supplied. If it does not cover the question, say so."
+    ),
+    "web": (
+        "You report current public information from the supplied sources "
+        "only. Attribute each claim to its source. Current news never changes "
+        "how urgent this patient's own situation is."
+    ),
+    "direct": (
+        "You reply briefly and warmly. If the message is not about health, "
+        "say so pleasantly in one line and offer what you can actually do — "
+        "do not pretend to answer it."
+    ),
 }
 
+# Applied to every non-consult agent. The old prompt asked for "2-4 short
+# sentences", which is why answers arrived as undifferentiated grey text.
+_FORMAT_RULES = """
+Formatting — this matters, the reply is rendered as markdown:
+- Open with the answer itself. No "Certainly!", no restating the question.
+- **Bold** the specific things that matter: values, names, dates, the verdict.
+- Use a short bulleted list when there is more than one item. Never a wall of text.
+- Use a `**Heading**` line only when the reply genuinely has two or more parts.
+- Two to three short paragraphs at most.
+- Never paste reference material verbatim; explain it in your own words.
+- Never invent names, results, prices, dates or availability.
+- If the information needed is missing, say plainly what is missing and what to do next."""
 
-def _synthesise(state: AgentState, route: str, tool_texts: list[str]) -> str:
-    """Build the reply for one agent, behind the PHI boundary."""
+
+def _synthesise(state: AgentState, route: str, tool_texts: list[str]) -> tuple[str, str]:
+    """Build the reply for one agent, behind the PHI boundary.
+
+    Returns ``(answer, source)`` so the trace can show which provider — or
+    which deterministic composer — actually produced the words.
+    """
     boundary = PHIBoundary(
         session_salt=state.get("session_id", "session"), route=route
     )
@@ -280,43 +427,140 @@ def _synthesise(state: AgentState, route: str, tool_texts: list[str]) -> str:
         state.get("language", "en"), "English"
     )
 
-    prompt = f"""{ai.SAFETY_PREAMBLE}
+    system = f"""{ai.SAFETY_PREAMBLE}
 
 {AGENT_BRIEF.get(route, "")}
+{_FORMAT_RULES}
 
-Patient context (de-identified): {safe_context}
+Answer in {language}."""
+
+    prompt = f"""Patient context (de-identified): {safe_context}
 
 Information retrieved for this question:
 {chr(10).join(tool_texts) if tool_texts else "None."}
 
-Patient's message: "{state.get('user_text', '')}"
-
-Answer in {language}, in 2-4 short sentences. Use only the information above.
-Do not invent names, results, prices or availability. If the information is
-missing, say so and suggest the next step."""
+Patient's message: "{state.get('user_text', '')}\""""
 
     try:
         boundary.guard(prompt)
     except EgressBlocked as exc:
         logger.error("Egress blocked for route %s: %s", route, exc)
         return (
-            "I could not prepare that answer safely. Please contact SuwaPath "
-            "Care on 0112 123 456."
+            "I couldn't prepare that answer safely, so I've stopped rather "
+            "than guess. Please try rephrasing, or call SuwaPath Care on "
+            "**0112 123 456**.",
+            "egress_blocked",
         )
 
-    generated = ai._generate(prompt, temperature=0.3)
-    if not generated:
-        # Deterministic fallback: return the retrieved facts directly rather
-        # than nothing, so the product still works without an API key.
-        return "\n".join(tool_texts) if tool_texts else (
-            "I can help with your symptoms, appointments, reports and general "
-            "health questions. What would you like to do?"
+    completion = llm.complete(prompt, system=system, temperature=0.3, max_tokens=650)
+    if completion:
+        return boundary.rehydrate(completion.text), completion.provider
+
+    return _deterministic_answer(state, route, tool_texts), "deterministic"
+
+
+# --------------------------------------------------------------------------
+# Deterministic composers
+# --------------------------------------------------------------------------
+# When no provider answers, these produce the reply. They previously returned
+# the raw tool output joined by newlines, which is what made the assistant read
+# like a database dump ("Current recommendation: respiratory medicine…
+# [kb-sym-006] Abdominal pain…"). Structured, readable text is the minimum bar
+# even with zero quota.
+_DETERMINISTIC_HEADING = {
+    "admin": "**Your appointments and nearby options**",
+    "records": "**What your records show**",
+    "knowledge": "**What the guidance says**",
+    "web": "**What current sources say**",
+}
+
+
+def _deterministic_answer(state: AgentState, route: str, tool_texts: list[str]) -> str:
+    """A readable reply assembled from tool output without a model."""
+    facts = [text.strip() for text in tool_texts if text and text.strip()]
+    if not facts:
+        return (
+            "I don't have anything on file for that yet.\n\n"
+            "**I can help you** describe a symptom, understand a report you've "
+            "uploaded, or find and book a doctor. Which would be useful?"
         )
-    return boundary.rehydrate(generated)
+
+    lines = [_DETERMINISTIC_HEADING.get(route, "**Here's what I found**"), ""]
+    for fact in facts:
+        # Tool text is already newline-separated records; render each as a
+        # bullet so the result is scannable rather than one long paragraph.
+        for piece in [p.strip() for p in fact.split("\n") if p.strip()]:
+            lines.append(piece if piece.startswith(("-", "*", "#")) else f"- {piece}")
+
+    lines += [
+        "",
+        "_Written from your SuwaPath records without a language model, so the "
+        "wording is plainer than usual. The information itself is current._",
+    ]
+    return "\n".join(lines)
 
 
-def clinical_agent(state: AgentState) -> dict:
-    return _run_agent(state, "clinical")
+def consult_agent(state: AgentState) -> dict:
+    """Doctor-style history taking. Asks or assesses; never both."""
+    started = time.perf_counter()
+    session_id = state.get("session_id", "session")
+    confidential = bool(state.get("confidential"))
+
+    memory = cag.memory_store.get(session_id, confidential=confidential)
+
+    # The consultation reads the patient's own clinical context, so it is
+    # minimised through the boundary like every other route.
+    boundary = PHIBoundary(session_salt=session_id, route="consult")
+    safe_context = boundary.minimise(state.get("safe_context") or {})
+
+    history = list(state.get("history") or [])
+    messages = [*history, {"role": "user", "content": state.get("user_text", "")}]
+
+    turn = consult.run(
+        messages=messages,
+        patient_context=safe_context,
+        language=state.get("language", "en"),
+        memory_asked=memory.asked,
+    )
+
+    if turn.slot:
+        memory.mark_asked(turn.slot)
+    if not memory.chief_complaint and messages:
+        memory.chief_complaint = messages[0].get("content", "")[:200]
+
+    return {
+        "agent_outputs": [{
+            "route": "consult",
+            "answer": boundary.rehydrate(turn.answer),
+            "structured": {
+                "consult": {
+                    "mode": turn.mode,
+                    "coverage": turn.coverage,
+                    "specialty": turn.specialty,
+                    "specialty_name": turn.specialty_name,
+                    "tests": turn.tests,
+                },
+            },
+            "confidence": 0.9,
+        }],
+        "consult": {
+            "mode": turn.mode,
+            "slot": turn.slot,
+            "coverage": turn.coverage,
+            "specialty": turn.specialty,
+            "specialty_name": turn.specialty_name,
+        },
+        "red_flags": turn.red_flags,
+        "trace": [{
+            "node": "consult_agent",
+            "mode": turn.mode,
+            "coverage": turn.coverage,
+            "urgency": turn.urgency,
+            "source": turn.source,
+            "tools": [],
+            "ms": int((time.perf_counter() - started) * 1000),
+        }],
+    }
 
 
 def admin_agent(state: AgentState) -> dict:
@@ -331,8 +575,29 @@ def knowledge_agent(state: AgentState) -> dict:
     return _run_agent(state, "knowledge")
 
 
+def web_agent(state: AgentState) -> dict:
+    return _run_agent(state, "web")
+
+
 def direct_agent(state: AgentState) -> dict:
     return _run_agent(state, "direct")
+
+
+_MERGE_SYSTEM = """You combine several assistants' answers into one reply to a
+patient who asked a multi-part question.
+
+- Answer every part they asked about. Drop nothing.
+- One coherent reply, not a list of separate answers stitched together.
+- Keep the markdown structure: **bold** for key facts, bullets for lists,
+  `**Heading**` lines when there are genuinely distinct parts.
+- Add no new facts.
+- If one assistant supplies a fact and another says it does not have that
+  information, that is NOT a disagreement — the second one simply could not
+  see it. Use the fact and never mention the gap. Only flag a genuine
+  conflict, where two assistants state different values for the same thing.
+- If one part is a question the assistant asked the patient, end with that
+  question so the conversation can continue.
+- Under 300 words."""
 
 
 def merge_node(state: AgentState) -> dict:
@@ -342,39 +607,57 @@ def merge_node(state: AgentState) -> dict:
     if not outputs:
         return {"answer": state.get("answer") or "", "trace": [{"node": "merge", "count": 0}]}
 
-    if len(outputs) == 1:
-        # Single route is the common case — no extra model call.
-        return {
-            "answer": outputs[0]["answer"],
-            "citations": (outputs[0].get("structured") or {}).get("citations", []),
-            "trace": [{"node": "merge", "count": 1, "source": "passthrough"}],
-        }
-
-    sections = "\n\n".join(
-        f"[{o['route']}] {o['answer']}" for o in outputs
-    )
-    prompt = f"""{ai.SAFETY_PREAMBLE}
-
-The patient asked one message containing several questions. Separate
-assistants answered each part:
-
-{sections}
-
-Combine these into ONE reply that answers every part. Keep it under six
-sentences, do not repeat yourself, and do not add new facts."""
-
-    merged = ai._generate(prompt, temperature=0.2)
     citations: list[dict] = []
     for output in outputs:
         citations.extend((output.get("structured") or {}).get("citations", []))
 
+    if len(outputs) == 1:
+        # Single route is the common case — no extra model call.
+        return {
+            "answer": outputs[0]["answer"],
+            "citations": citations,
+            "trace": [{"node": "merge", "count": 1, "source": "passthrough"}],
+        }
+
+    # A consultation question must survive merging intact. If the consult
+    # agent asked something, that question is the point of the turn — letting
+    # a summariser paraphrase it tends to turn it into a statement and the
+    # history-taking loop stalls.
+    consult_question = next(
+        (
+            o["answer"] for o in outputs
+            if o["route"] == "consult"
+            and (o.get("structured", {}).get("consult", {}).get("mode") == "ask")
+        ),
+        None,
+    )
+
+    sections = "\n\n".join(f"[{o['route']}]\n{o['answer']}" for o in outputs)
+    instruction = (
+        f"{sections}\n\nEnd your reply with exactly this question, unchanged:\n"
+        f"{consult_question}"
+        if consult_question
+        else sections
+    )
+
+    completion = llm.complete(
+        instruction, system=_MERGE_SYSTEM, temperature=0.2, max_tokens=700
+    )
+
+    if completion:
+        answer, source = completion.text, completion.provider
+    else:
+        answer = "\n\n".join(o["answer"] for o in outputs)
+        source = "concatenated"
+
     return {
-        "answer": merged or "\n\n".join(o["answer"] for o in outputs),
+        "answer": answer,
         "citations": citations,
         "trace": [{
             "node": "merge",
             "count": len(outputs),
-            "source": "gemini" if merged else "concatenated",
+            "source": source,
+            "ms": completion.latency_ms if completion else 0,
         }],
     }
 
@@ -414,35 +697,50 @@ def judge_node(state: AgentState) -> dict:
 # --------------------------------------------------------------------------
 # Graph
 # --------------------------------------------------------------------------
+_AGENT_NODES = (
+    "consult_agent", "admin_agent", "records_agent",
+    "knowledge_agent", "web_agent", "direct_agent",
+)
+
+
 def _after_guard(state: AgentState) -> str:
-    return END if state.get("answer") and not state.get("routes") else "route"
+    """A blocked or crisis input never reaches the cache or a model."""
+    return END if state.get("answer") and not state.get("routes") else "cache_lookup"
+
+
+def _after_cag(state: AgentState) -> str:
+    """A cache hit is the final answer; it still passes the judge."""
+    return "judge" if (state.get("cag") or {}).get("hit") else "route"
 
 
 def build_agent_graph():
     graph = StateGraph(AgentState)
 
     graph.add_node("guard_input", guard_input_node)
+    graph.add_node("cache_lookup", cag_node)
     graph.add_node("route", route_node)
-    graph.add_node("clinical_agent", clinical_agent)
+    graph.add_node("consult_agent", consult_agent)
     graph.add_node("admin_agent", admin_agent)
     graph.add_node("records_agent", records_agent)
     graph.add_node("knowledge_agent", knowledge_agent)
+    graph.add_node("web_agent", web_agent)
     graph.add_node("direct_agent", direct_agent)
     graph.add_node("merge", merge_node)
     graph.add_node("judge", judge_node)
 
     graph.add_edge(START, "guard_input")
-    graph.add_conditional_edges("guard_input", _after_guard, {"route": "route", END: END})
+    graph.add_conditional_edges(
+        "guard_input", _after_guard, {"cache_lookup": "cache_lookup", END: END}
+    )
+    graph.add_conditional_edges(
+        "cache_lookup", _after_cag, {"route": "route", "judge": "judge"}
+    )
 
     # Fan-out: `dispatch` returns one Send per selected route, all executed
     # in the same superstep.
-    graph.add_conditional_edges("route", dispatch, [
-        "clinical_agent", "admin_agent", "records_agent",
-        "knowledge_agent", "direct_agent",
-    ])
+    graph.add_conditional_edges("route", dispatch, list(_AGENT_NODES))
 
-    for node in ("clinical_agent", "admin_agent", "records_agent",
-                 "knowledge_agent", "direct_agent"):
+    for node in _AGENT_NODES:
         graph.add_edge(node, "merge")
 
     graph.add_edge("merge", "judge")
@@ -456,13 +754,12 @@ agent_graph = build_agent_graph()
 
 def topology() -> dict:
     return {
-        "nodes": [
-            "guard_input", "route", "clinical_agent", "admin_agent",
-            "records_agent", "knowledge_agent", "direct_agent", "merge", "judge",
-        ],
+        "nodes": ["guard_input", "cache_lookup", "route", *_AGENT_NODES, "merge", "judge"],
         "parallel_agents": list(VALID_ROUTES),
         "max_parallel_routes": MAX_ROUTES,
-        "deterministic_nodes": ["guard_input", "judge"],
+        "deterministic_nodes": ["guard_input", "cache_lookup", "judge"],
         "llm_nodes": ["route", "*_agent", "merge"],
         "urgency_authority": "deterministic_red_flag_engine",
+        "cache": cag.status(),
+        "consultation": consult.status(),
     }

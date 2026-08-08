@@ -25,6 +25,7 @@ from typing import Any
 from app.core.config import settings
 from app.clinical.lexicon import concept_label, extract_concepts
 from app.models.enums import Language
+from app.services import llm
 from app.services.knowledge import knowledge_service
 
 logger = logging.getLogger(__name__)
@@ -85,52 +86,21 @@ class AssistantTurn:
 
 
 # --------------------------------------------------------------------------
-# Gemini client
+# Language model access
 # --------------------------------------------------------------------------
-_client = None
-_client_failed = False
-
-
-def _get_client():
-    """Lazily construct the Gemini client; returns None when unavailable."""
-    global _client, _client_failed
-    if _client is not None or _client_failed:
-        return _client
-    if not settings.gemini_enabled:
-        _client_failed = True
-        return None
-    try:
-        from google import genai
-
-        _client = genai.Client(api_key=settings.gemini_api_key)
-        return _client
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Gemini client unavailable (%s); using deterministic fallbacks.", exc)
-        _client_failed = True
-        return None
-
-
+# All generation goes through app.services.llm, which tries Groq, then
+# OpenRouter, then Gemini, and reports which one answered. The helpers below
+# are the legacy single-string interface every existing call site uses; they
+# stay so those call sites did not all have to change at once.
 def gemini_available() -> bool:
-    return _get_client() is not None
+    """Deprecated name kept for call-site compatibility: is *any* model up?"""
+    return llm.available()
 
 
 def _generate(prompt: str, *, temperature: float = 0.2, as_json: bool = False) -> str | None:
-    client = _get_client()
-    if client is None:
-        return None
-    try:
-        config: dict[str, Any] = {"temperature": temperature}
-        if as_json:
-            config["response_mime_type"] = "application/json"
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt,
-            config=config,
-        )
-        return (response.text or "").strip()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Gemini generation failed (%s); using deterministic fallback.", exc)
-        return None
+    """Single-prompt generation. Returns None when no provider answered."""
+    completion = llm.complete(prompt, temperature=temperature, as_json=as_json)
+    return completion.text if completion else None
 
 
 def _parse_json(raw: str | None) -> dict | None:
@@ -703,11 +673,15 @@ def web_search(query: str, *, max_results: int = 4) -> list[dict]:
 
 
 def orchestrator_status() -> dict:
+    llm_status = llm.status()
     return {
+        "llm": llm_status,
+        "llm_available": llm_status["any_available"],
+        # Retained so existing clients and tests keep working.
         "gemini_configured": settings.gemini_enabled,
-        "gemini_reachable": gemini_available(),
+        "gemini_reachable": llm_status["any_available"],
         "gemini_model": settings.gemini_model if settings.gemini_enabled else None,
         "tavily_configured": settings.tavily_enabled,
         "knowledge_backend": knowledge_service.backend,
-        "fallback_mode": not gemini_available(),
+        "fallback_mode": not llm_status["any_available"],
     }

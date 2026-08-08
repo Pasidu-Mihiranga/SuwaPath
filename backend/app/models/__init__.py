@@ -4,6 +4,7 @@ Importing this package registers every mapper, which `create_all()` relies on.
 """
 
 from app.models.base import Base, TimestampMixin, new_uuid, utcnow
+from app.models.chat import ChatMessage, ChatSession
 from app.models.care import (
     Appointment,
     CareEnrollment,
@@ -57,6 +58,8 @@ from app.models.providers import (
 )
 
 __all__ = [
+    "ChatMessage",
+    "ChatSession",
     "Base",
     "TimestampMixin",
     "new_uuid",

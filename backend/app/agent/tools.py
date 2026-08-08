@@ -29,6 +29,7 @@ from app.models.clinical import (
 )
 from app.models.enums import AppointmentStatus, GuardianPermissionType, UserRole
 from app.models.identity import GuardianRelationship, PatientProfile, User
+from app.agent import websearch
 from app.models.providers import Doctor, Hospital
 from app.services.knowledge import knowledge_service
 from app.services.matching import MatchCriteria, match_doctors, match_facilities
@@ -312,7 +313,15 @@ def tool_knowledge(db: Session, scope: dict, *, question: str = "", **_: Any) ->
     """Grounded retrieval from the curated health corpus."""
     grounding, citations = knowledge_service.build_context(question, limit=3)
     if not grounding:
-        return "No matching guidance found in the knowledge base.", {"citations": []}
+        # Said explicitly so the agent refuses rather than improvising. An
+        # unanswerable health question is a fine outcome; an invented answer
+        # is not.
+        return (
+            "NOTHING RELEVANT FOUND. The knowledge base does not cover this "
+            "question. Say you don't have reliable information on it and "
+            "offer what SuwaPath can actually do.",
+            {"citations": []},
+        )
     return grounding, {"citations": citations}
 
 
@@ -348,6 +357,27 @@ def tool_recommendation(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
     return text, {"recommendation": structured}
 
 
+def tool_web_search(
+    db: Session, scope: dict, *, question: str = "", **_: Any
+) -> tuple[str, dict]:
+    """Current public information from reputable health sources.
+
+    The patient's message is never forwarded verbatim — ``websearch`` refuses
+    anything that reads as personal, and the query is guarded before it leaves.
+    """
+    outcome = websearch.search(question, session_salt=scope.get("session_id", "search"))
+    if outcome.status == "blocked":
+        raise ToolDenied(outcome.detail)
+    if not outcome.results:
+        return f"No reliable current source found. ({outcome.detail})", {"citations": []}
+    return websearch.as_context(outcome), {
+        "citations": websearch.as_citations(outcome),
+        "web_sources": [
+            {"title": r.title, "url": r.url, "domain": r.domain} for r in outcome.results
+        ],
+    }
+
+
 # Registry consulted by the agent nodes. Keys are stable tool names that
 # appear in the SSE trace, so the UI can label each chip.
 TOOLS = {
@@ -357,13 +387,21 @@ TOOLS = {
     "medications": tool_medications,
     "knowledge": tool_knowledge,
     "recommendation": tool_recommendation,
+    "web_search": tool_web_search,
 }
 
 # Which tools each route is allowed to call.
+#
+# `consult` deliberately does NOT get the knowledge tool. It runs its own
+# history-taking loop and pulling corpus text into that prompt was what made
+# earlier answers read as pasted reference material rather than a reply.
 ROUTE_TOOLS: dict[str, tuple[str, ...]] = {
-    "clinical": ("recommendation", "knowledge"),
+    "consult": ("recommendation",),
     "admin": ("appointments", "find_care"),
     "records": ("records", "medications"),
     "knowledge": ("knowledge",),
+    "web": ("web_search",),
     "direct": (),
+    # Legacy alias.
+    "clinical": ("recommendation",),
 }

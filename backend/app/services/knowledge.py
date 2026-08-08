@@ -224,9 +224,22 @@ class KnowledgeService:
                 out.append(RetrievedDoc(doc, float(hit.score)))
         return out
 
-    def build_context(self, query: str, *, limit: int = 3) -> tuple[str, list[dict]]:
-        """Return (grounding text, citations) for injection into an LLM prompt."""
-        results = self.search(query, limit=limit)
+    # Vector search always returns its top-k, however poor the match. Asking
+    # "who is Kusal Mendis" used to come back with the three least-unrelated
+    # health articles in the corpus, which the model then dutifully wrote up.
+    # Anything below this is treated as no match at all.
+    MIN_RELEVANCE = 0.35
+
+    def build_context(
+        self, query: str, *, limit: int = 3, min_score: float | None = None
+    ) -> tuple[str, list[dict]]:
+        """Return (grounding text, citations) for injection into an LLM prompt.
+
+        Returns empty when nothing in the corpus is relevant, so the caller can
+        say it does not know rather than grounding on noise.
+        """
+        floor = self.MIN_RELEVANCE if min_score is None else min_score
+        results = [r for r in self.search(query, limit=limit) if r.score >= floor]
         if not results:
             return "", []
         blocks = [f"[{r.doc.id}] {r.doc.title}\n{r.doc.text}" for r in results]
