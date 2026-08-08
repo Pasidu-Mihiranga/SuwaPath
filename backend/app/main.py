@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import (
     admin,
+    agent,
     appointments,
     auth,
     care,
@@ -93,6 +94,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 prefix = settings.api_v1_prefix
 for router in (
     auth.router,
+    agent.router,
     patients.router,
     symptoms.router,
     media.router,
