@@ -36,6 +36,73 @@ const PROGRAMME_STYLE: Record<string, string> = {
   sexual_health: "sp-gradient-programme",
 };
 
+/**
+ * One shape for every care-programme card.
+ *
+ * The three cards carry different content — two have artwork and a progress
+ * bar, the confidential one has a shield and a link — and when each was built
+ * inline they drifted into looking like different components. The media block
+ * is a fixed height whether it holds an illustration or an icon, and the
+ * footer is pinned to the bottom, so the cards line up across a row and stack
+ * consistently on mobile regardless of what is inside them.
+ */
+function ProgrammeCard({
+  to,
+  href,
+  accent,
+  art,
+  icon,
+  title,
+  subtitle,
+  children,
+}: {
+  to?: string;
+  href?: string;
+  accent: string;
+  art: string | null;
+  icon?: IconName;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const body = (
+    <>
+      <div className="mb-3 grid h-24 place-items-center">
+        {art ? (
+          <img
+            src={art}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            className="pointer-events-none max-h-24 w-auto select-none object-contain"
+          />
+        ) : (
+          icon && (
+            <span className="grid h-16 w-16 place-items-center rounded-2xl bg-white/80 text-programme-text">
+              <Icon name={icon} size={30} />
+            </span>
+          )
+        )}
+      </div>
+      <p className="font-semibold text-ink-900">{title}</p>
+      {subtitle && <p className="mt-1 text-sm text-ink-600">{subtitle}</p>}
+      <div className="mt-auto pt-3">{children}</div>
+    </>
+  );
+
+  const className = `flex h-full flex-col overflow-hidden rounded-lg border p-4 transition hover:shadow-md ${accent}`;
+
+  return href ? (
+    <a href={href} className={className}>
+      {body}
+    </a>
+  ) : (
+    <Link to={to!} className={className}>
+      {body}
+    </Link>
+  );
+}
+
 export default function PatientDashboard() {
   const { user } = useAuth();
   const [data, setData] = useState<any>(null);
@@ -57,10 +124,39 @@ export default function PatientDashboard() {
     <div className="space-y-6">
       {/* Welcome + primary action */}
       <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
-        <div className="lg:col-span-2 sp-card sp-gradient-brand-soft p-5 sm:p-6 relative overflow-hidden">
+        {/* Text and artwork are columns rather than text with an absolutely
+            positioned image behind it. The card stretches to match the
+            recommendation card beside it, and the old absolute layout left
+            that extra height as dead space in the middle; as a flex row the
+            actions sit at the bottom and the figure stands on the same
+            baseline, so the card fills however tall it has to be. */}
+        <div className="lg:col-span-2 sp-card sp-gradient-brand-soft p-5 sm:p-6 flex gap-3 sm:gap-4 overflow-hidden">
+          <div className="flex-1 min-w-0 flex flex-col">
+            <h1 className="sp-display text-2xl sm:text-[1.75rem]">
+              Welcome back, {user?.full_name.split(" ")[0]}
+            </h1>
+            <p className="mt-1 text-ink-600">
+              Let's take the next best step for your health.
+            </p>
+            <div className="mt-auto pt-5 flex flex-wrap gap-2.5">
+              {ACTIONS.map((action) => (
+                <Link
+                  key={action.to}
+                  to={action.to}
+                  className={action.primary ? "sp-btn sp-btn-primary" : "sp-btn sp-btn-secondary bg-white"}
+                >
+                  <Icon name={action.icon} size={18} />
+                  {action.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+
           {/* Decorative and gender-aware where the patient told us, neutral
               where they did not — see lib/illustration.ts. Hidden from
-              assistive tech: it carries nothing the text does not. */}
+              assistive tech: it carries nothing the text does not. Shown on
+              mobile too, just narrower — it is the one piece of the page that
+              reflects the person using it. */}
           <img
             src={patientIllustration({
               sex: data.patient?.sex,
@@ -69,28 +165,8 @@ export default function PatientDashboard() {
             alt=""
             aria-hidden="true"
             loading="lazy"
-            className="pointer-events-none absolute bottom-0 right-3 hidden max-h-[92%] w-40 select-none object-contain object-bottom sm:block lg:right-6 lg:w-48"
+            className="pointer-events-none w-20 shrink-0 self-end select-none object-contain object-bottom sm:w-32 lg:w-44"
           />
-          <div className="relative sm:max-w-[62%]">
-            <h1 className="sp-display text-2xl sm:text-[1.75rem]">
-              Welcome back, {user?.full_name.split(" ")[0]}
-            </h1>
-            <p className="mt-1 text-ink-600">
-              Let's take the next best step for your health.
-            </p>
-          </div>
-          <div className="relative mt-5 flex flex-wrap gap-2.5">
-            {ACTIONS.map((action) => (
-              <Link
-                key={action.to}
-                to={action.to}
-                className={action.primary ? "sp-btn sp-btn-primary" : "sp-btn sp-btn-secondary bg-white"}
-              >
-                <Icon name={action.icon} size={18} />
-                {action.label}
-              </Link>
-            ))}
-          </div>
         </div>
 
         <Card
@@ -290,67 +366,50 @@ export default function PatientDashboard() {
                 </div>
               )}
               {data.care_programmes?.map((programme: any) => (
-                <Link
+                <ProgrammeCard
                   key={programme.id}
                   to="/patient/programmes"
-                  className={`relative overflow-hidden rounded-lg border p-4 transition hover:shadow-md ${
-                    PROGRAMME_STYLE[programme.type] ?? "sp-gradient-elderly"
-                  }`}
+                  accent={PROGRAMME_STYLE[programme.type] ?? "sp-gradient-elderly"}
+                  art={programmeIllustration(programme.type)}
+                  title={programme.name}
+                  subtitle={
+                    data.maternal_summary && programme.type === "maternal"
+                      ? `Pregnancy week ${data.maternal_summary.pregnancy_week}`
+                      : "Reminders, check-ins and follow-up."
+                  }
                 >
-                  {/* Decorative. Absent for the confidential programme by
-                      design — see lib/illustration.ts. */}
-                  {programmeIllustration(programme.type) && (
-                    <img
-                      src={programmeIllustration(programme.type)!}
-                      alt=""
-                      aria-hidden="true"
-                      loading="lazy"
-                      className="pointer-events-none mx-auto mb-3 h-24 w-auto select-none object-contain"
+                  <div className="h-1.5 rounded-full bg-white/70 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-brand-600"
+                      style={{ width: `${programme.progress_percent}%` }}
                     />
-                  )}
-                  <div className="relative">
-                    <p className="font-semibold text-ink-900">{programme.name}</p>
-                    {data.maternal_summary && programme.type === "maternal" && (
-                      <p className="text-sm text-ink-600 mt-1">
-                        Pregnancy week {data.maternal_summary.pregnancy_week}
-                      </p>
-                    )}
-                    <div className="mt-3 h-1.5 rounded-full bg-white/70 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-brand-600"
-                        style={{ width: `${programme.progress_percent}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-ink-500 mt-1.5">
-                      {Math.round(programme.progress_percent)}% complete
-                    </p>
                   </div>
-                </Link>
+                  <p className="text-xs text-ink-500 mt-1.5">
+                    {Math.round(programme.progress_percent)}% complete
+                  </p>
+                </ProgrammeCard>
               ))}
 
               {/* Always offered, never "enrolled in": the confidential pathway
                   is reached anonymously rather than from this account, so it
                   is not part of care_programmes (spec §16). It carries a shield
                   rather than artwork — a recognisable sexual-health image is
-                  exactly what someone glancing at a shared phone would notice. */}
-              <a
+                  exactly what someone glancing at a shared phone would notice —
+                  but it keeps the same card shape so it does not read as a
+                  different kind of thing. */}
+              <ProgrammeCard
                 href="/private"
-                className="relative flex flex-col rounded-lg border p-4 transition hover:shadow-md sp-gradient-programme"
+                accent="sp-gradient-programme"
+                art={null}
+                icon="privacy"
+                title="Confidential Sexual Health Support"
+                subtitle="Private. Safe. Professional. We're here to help."
               >
-                <span className="sp-icon-tile mb-3 bg-white/80 text-programme-text">
-                  <Icon name="privacy" size={22} />
-                </span>
-                <p className="font-semibold text-ink-900">
-                  Confidential Sexual Health Support
-                </p>
-                <p className="mt-1 text-sm text-ink-600">
-                  Private. Safe. Professional. We're here to help.
-                </p>
-                <span className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-programme-text">
+                <span className="inline-flex items-center gap-1 text-sm font-semibold text-programme-text">
                   Continue privately
                   <Icon name="arrowRight" size={16} />
                 </span>
-              </a>
+              </ProgrammeCard>
             </div>
           }
         </Card>

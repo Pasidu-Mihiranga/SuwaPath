@@ -123,38 +123,42 @@ function ProgrammeCatalogue({
               return (
                 <div
                   key={programme.code}
-                  className={`relative overflow-hidden rounded-xl border border-line p-4 ${style.accent}`}
+                  className={`relative flex h-full flex-col overflow-hidden rounded-xl border border-line p-4 ${style.accent}`}
                 >
-                  {/* Decorative. The confidential pathway returns none, which
-                      is the point — see lib/illustration.ts. */}
-                  {programmeIllustration(programme.programme_type) && (
-                    <img
-                      src={programmeIllustration(programme.programme_type)!}
-                      alt=""
-                      aria-hidden="true"
-                      loading="lazy"
-                      className="pointer-events-none mb-3 h-20 w-auto select-none object-contain"
-                    />
-                  )}
-                  <div className="relative flex items-start gap-3">
-                    <span className="sp-icon-tile bg-surface text-brand-700">
-                      <Icon name={style.icon} size={20} />
-                    </span>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-ink-900">{programme.name}</p>
-                      <p className="text-sm text-ink-600 mt-0.5">
-                        {programme.description}
-                      </p>
-                    </div>
+                  {/* Same media-then-text shape as the dashboard cards. The
+                      artwork replaces the icon rather than sitting next to it:
+                      showing both said the same thing twice. The confidential
+                      pathway has no artwork by design, so it keeps the icon —
+                      see lib/illustration.ts. */}
+                  <div className="mb-3 grid h-20 place-items-center">
+                    {programmeIllustration(programme.programme_type) ? (
+                      <img
+                        src={programmeIllustration(programme.programme_type)!}
+                        alt=""
+                        aria-hidden="true"
+                        loading="lazy"
+                        className="pointer-events-none max-h-20 w-auto select-none object-contain"
+                      />
+                    ) : (
+                      <span className="grid h-14 w-14 place-items-center rounded-2xl bg-surface text-programme-text">
+                        <Icon name={style.icon} size={26} />
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative min-w-0">
+                    <p className="font-semibold text-ink-900">{programme.name}</p>
+                    <p className="text-sm text-ink-600 mt-0.5">
+                      {programme.description}
+                    </p>
                   </div>
                   {isConfidential ? (
-                    <a href="/private" className="sp-btn sp-btn-secondary sp-btn-sm mt-3 relative">
+                    <a href="/private" className="sp-btn sp-btn-secondary sp-btn-sm mt-auto relative self-start">
                       <Icon name="privacy" size={15} />
                       Continue privately
                     </a>
                   ) : (
                     <button
-                      className="sp-btn sp-btn-primary sp-btn-sm mt-3 relative"
+                      className="sp-btn sp-btn-primary sp-btn-sm mt-auto relative self-start"
                       onClick={() => setJoining(programme)}
                     >
                       Join programme
