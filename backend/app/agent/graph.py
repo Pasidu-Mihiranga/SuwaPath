@@ -206,6 +206,7 @@ def route_node(state: AgentState) -> dict:
         routes,
         mid_consultation=mid_consultation,
         seeking_service=bool(_SEEKING_SERVICE.search(message or "")),
+        asking_policy=bool(_ASKING_POLICY.search(message or "")),
     )
 
     return {
@@ -230,7 +231,11 @@ def _awaiting_answer(history: list[dict]) -> bool:
 
 
 def _prune_routes(
-    routes: list[dict], *, mid_consultation: bool, seeking_service: bool = False
+    routes: list[dict],
+    *,
+    mid_consultation: bool,
+    seeking_service: bool = False,
+    asking_policy: bool = False,
 ) -> list[dict]:
     """Drop routes that only add noise.
 
@@ -243,6 +248,16 @@ def _prune_routes(
     """
     if not routes:
         return routes
+
+    # A question about who may see a record must never be answered by
+    # reading the record out. Disclosing the thing being asked about is the
+    # worst possible response to a privacy question.
+    if asking_policy:
+        return [{
+            "route": "knowledge",
+            "confidence": 0.85,
+            "reasoning": "Privacy or consent question — answered from policy, not records.",
+        }]
 
     # "Where can I get an MRI and what does it cost?" shares every keyword
     # with "what did my MRI show?". Classifiers routinely pick `records` for
@@ -268,9 +283,22 @@ def _prune_routes(
     return routes[:MAX_ROUTES]
 
 
+# Any "-ologist" / "-iatrician" is someone to be found and booked. Listing
+# every specialty by hand guarantees the list goes stale the moment one is
+# added to the catalogue, so match the shape of the word instead.
+_SPECIALIST_WORD = re.compile(
+    r"\b\w+(?:ologist|iatrician|iatrist|urgeon|ontist|opath|therapist)\b", re.I)
+
+# Phrases that mean "locate a provider for me", which carry no clinical or
+# record vocabulary of their own.
+_FINDING = re.compile(
+    r"\b(find|recommend|suggest|show|list|need|want|looking for|nearest|"
+    r"near me|nearby|around me|close by|who can i see|where do i go)\b", re.I)
+
 _FALLBACK_KEYWORDS = [
     ("admin", ("appointment", "book", "booking", "doctor", "hospital",
-               "reschedule", "cancel", "clinic", "specialist", "channel")),
+               "reschedule", "cancel", "clinic", "specialist", "channel",
+               "consultant", "physician", "lab", "laboratory", "pharmacy")),
     ("records", ("report", "result", "scan", "x-ray", "xray", "medication",
                  "blood test", "lab", "prescription", "screening")),
     ("web", ("outbreak", "latest", "current", "news", "recall", "this year",
@@ -300,14 +328,49 @@ _SEEKING_SERVICE = re.compile(
 )
 
 
+# "Can my husband see my reports?" is a question about permissions, not about
+# the reports. Routed to `records` it returns the lab values themselves —
+# answering a privacy question by disclosing the very thing being asked about.
+_ASKING_POLICY = re.compile(
+    r"\b(who|can|could|does|do|is|will)\b.{0,40}"
+    r"\b(see|access|read|view|share[sd]?|shown|told|find out|know about)\b"
+    r".{0,30}\b(my|our|the)\b.{0,25}"
+    r"\b(record|report|result|data|information|history|detail|chat|"
+    r"conversation|message)s?\b"
+    r"|\b(privacy|confidential|consent|permission|who has access|"
+    r"data protection)\b"
+    r"|\bis\s+(this|it|my|the)\b(?:\W+\w+){0,3}\W+(private|secure|safe|confidential|saved|stored|recorded)\b"
+    r"|\b(delete|remove|withdraw)\b.{0,25}\b(my )?(data|consent|access|account)\b",
+    re.I,
+)
+
+
 def _fallback_routes(message: str) -> list[dict]:
     """Keyword multi-intent detection, used when no LLM router is available."""
     lowered = (message or "").lower()
+    if _ASKING_POLICY.search(lowered):
+        return [{
+            "route": "knowledge",
+            "confidence": 0.8,
+            "reasoning": "Asking about privacy or consent, not about record content.",
+        }]
     if _SEEKING_SERVICE.search(lowered):
         return [{
             "route": "admin",
             "confidence": 0.7,
             "reasoning": "Looking for where to obtain a test, not for a past result.",
+        }]
+    # "Find me a dermatologist who speaks Tamil" contains none of the keyword
+    # table's admin words. Without this it fell through to `direct` whenever
+    # the model router was rate-limited, and the patient got a shrug.
+    if _SPECIALIST_WORD.search(lowered) or (
+        _FINDING.search(lowered)
+        and any(w in lowered for w in ("doctor", "hospital", "clinic", "lab", "someone"))
+    ):
+        return [{
+            "route": "admin",
+            "confidence": 0.7,
+            "reasoning": "Looking for a provider.",
         }]
     clauses = [c.strip() for c in _CLAUSE_SPLIT.split(lowered) if c.strip()]
     if not clauses:
@@ -425,7 +488,17 @@ AGENT_BRIEF = {
     "web": (
         "You report current public information from the supplied sources "
         "only. Attribute each claim to its source. Current news never changes "
-        "how urgent this patient's own situation is."
+        "how urgent this patient's own situation is.\n"
+        "Never conclude that something is not happening because your sources "
+        "did not mention it. Absence of a result is not evidence of absence — "
+        "if the sources do not settle the question, say you could not confirm "
+        "it and name where to check, rather than reporting 'there is no "
+        "outbreak'. Getting that backwards during a real outbreak is the "
+        "worst thing this route can do.\n"
+        "When you report an outbreak or a health risk, always finish with "
+        "**what to watch for** and **when to seek care**, taken from the "
+        "reference material supplied. A patient who learns there is an "
+        "outbreak and nothing else has been made anxious and no safer."
     ),
     "direct": (
         "You reply briefly and warmly. If the message is not about health, "

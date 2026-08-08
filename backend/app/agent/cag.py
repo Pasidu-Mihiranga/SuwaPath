@@ -140,6 +140,9 @@ _CACHEABLE: list[dict[str, Any]] = [
             "is my data private", "who can see my data", "is this confidential",
             "do you share my information", "is this secure",
             "what happens to my data", "do you send my data to ai",
+            "is this chat really private", "is this chat private",
+            "is this conversation private", "is my chat saved",
+            "are my messages stored", "do you keep my messages",
         ],
         "answer": (
             "A fair thing to ask, and here is the honest version.\n\n"

@@ -409,7 +409,13 @@ def tool_web_search(
     The patient's message is never forwarded verbatim — ``websearch`` refuses
     anything that reads as personal, and the query is guarded before it leaves.
     """
-    outcome = websearch.search(question, session_salt=scope.get("session_id", "search"))
+    # The patient's message is rebuilt into a query rather than forwarded:
+    # "is there a dengue outbreak right now?" names no country, and a search
+    # engine answers it globally unless told otherwise.
+    outcome = websearch.search(
+        websearch.build_query(question),
+        session_salt=scope.get("session_id", "search"),
+    )
     if outcome.status == "blocked":
         raise ToolDenied(outcome.detail)
     if not outcome.results:
@@ -445,7 +451,10 @@ ROUTE_TOOLS: dict[str, tuple[str, ...]] = {
     "admin": ("appointments", "find_care", "directory"),
     "records": ("records", "medications"),
     "knowledge": ("knowledge",),
-    "web": ("web_search",),
+    # Knowledge rides along with web search so an outbreak answer can say
+    # what to watch for and when to seek care. News reports numbers; the
+    # curated corpus supplies the clinical guidance, so neither is invented.
+    "web": ("web_search", "knowledge"),
     "direct": (),
     # Legacy alias.
     "clinical": ("recommendation",),
