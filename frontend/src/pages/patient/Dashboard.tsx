@@ -15,6 +15,7 @@ import {
 } from "../../components/ui";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { patientIllustration } from "../../lib/illustration";
 
 const ACTIONS: {
   to: string;
@@ -57,19 +58,28 @@ export default function PatientDashboard() {
       {/* Welcome + primary action */}
       <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2 sp-card sp-gradient-brand-soft p-5 sm:p-6 relative overflow-hidden">
+          {/* Decorative and gender-aware where the patient told us, neutral
+              where they did not — see lib/illustration.ts. Hidden from
+              assistive tech: it carries nothing the text does not. */}
           <img
-            src="/brand/mark.png"
+            src={patientIllustration({
+              sex: data.patient?.sex,
+              age: data.patient?.age,
+            })}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none select-none absolute -right-6 -bottom-8 w-44 opacity-[0.07] hidden sm:block"
+            loading="lazy"
+            className="pointer-events-none absolute -bottom-4 -right-4 hidden w-40 select-none opacity-90 sm:block lg:w-48"
           />
-          <h1 className="text-2xl font-bold text-ink-900">
-            Welcome back, {user?.full_name.split(" ")[0]}
-          </h1>
-          <p className="text-ink-600 mt-1">
-            Let's take the next best step for your health.
-          </p>
-          <div className="mt-5 flex flex-wrap gap-2.5">
+          <div className="relative sm:max-w-[62%]">
+            <h1 className="sp-display text-2xl sm:text-[1.75rem]">
+              Welcome back, {user?.full_name.split(" ")[0]}
+            </h1>
+            <p className="mt-1 text-ink-600">
+              Let's take the next best step for your health.
+            </p>
+          </div>
+          <div className="relative mt-5 flex flex-wrap gap-2.5">
             {ACTIONS.map((action) => (
               <Link
                 key={action.to}
