@@ -133,10 +133,10 @@ function ProgrammeCatalogue({
                       alt=""
                       aria-hidden="true"
                       loading="lazy"
-                      className="pointer-events-none absolute -bottom-2 -right-1 hidden w-20 select-none sm:block"
+                      className="pointer-events-none mb-3 h-20 w-auto select-none object-contain"
                     />
                   )}
-                  <div className="relative flex items-start gap-3 sm:pr-16">
+                  <div className="relative flex items-start gap-3">
                     <span className="sp-icon-tile bg-surface text-brand-700">
                       <Icon name={style.icon} size={20} />
                     </span>

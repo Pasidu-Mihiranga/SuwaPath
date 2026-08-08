@@ -90,7 +90,13 @@ export function guardianIllustration(
   return `${BASE}/guardian-elder-${dependantSex}-carer-${carerSex}.webp`;
 }
 
-/** Care-programme artwork. Fixed per programme — not personalised. */
+/**
+ * Care-programme artwork.
+ *
+ * Fixed per programme, deliberately not personalised. A programme card is
+ * about the programme, not about the viewer — the per-person portraits belong
+ * to the dashboard hero, where the patient is the subject.
+ */
 export function programmeIllustration(programmeType?: string | null): string | null {
   const type = (programmeType ?? "").toLowerCase();
   if (type.includes("maternal") || type.includes("postpartum")) {
