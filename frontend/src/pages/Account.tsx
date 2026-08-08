@@ -253,7 +253,7 @@ export function Profile() {
                   answer, not missing data — see lib/illustration.ts. */}
               <Row label="Sex" hint="Optional. Used for clinical context and artwork.">
                 <select
-                  className="sp-input"
+                  className="sp-select"
                   value={form.sex}
                   onChange={(event) => set("sex", event.target.value)}
                 >

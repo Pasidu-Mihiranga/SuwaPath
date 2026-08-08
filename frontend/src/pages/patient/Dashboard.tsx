@@ -124,21 +124,19 @@ export default function PatientDashboard() {
     <div className="space-y-6">
       {/* Welcome + primary action */}
       <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
-        {/* Text and artwork are columns rather than text with an absolutely
-            positioned image behind it. The card stretches to match the
-            recommendation card beside it, and the old absolute layout left
-            that extra height as dead space in the middle; as a flex row the
-            actions sit at the bottom and the figure stands on the same
-            baseline, so the card fills however tall it has to be. */}
-        <div className="lg:col-span-2 sp-card sp-gradient-brand-soft p-5 sm:p-6 flex gap-3 sm:gap-4 overflow-hidden">
-          <div className="flex-1 min-w-0 flex flex-col">
+        {/* `self-start` is what kills the dead space: as a grid item this card
+            would otherwise stretch to match the taller recommendation card
+            beside it, and no amount of internal alignment fills height the
+            content does not have. Sized to its own content instead. */}
+        <div className="lg:col-span-2 lg:self-start sp-card sp-gradient-brand-soft p-5 sm:p-6 flex gap-3 sm:gap-4 overflow-hidden">
+          <div className="flex-1 min-w-0">
             <h1 className="sp-display text-2xl sm:text-[1.75rem]">
               Welcome back, {user?.full_name.split(" ")[0]}
             </h1>
             <p className="mt-1 text-ink-600">
               Let's take the next best step for your health.
             </p>
-            <div className="mt-auto pt-5 flex flex-wrap gap-2.5">
+            <div className="mt-5 flex flex-wrap gap-2.5">
               {ACTIONS.map((action) => (
                 <Link
                   key={action.to}
@@ -165,7 +163,7 @@ export default function PatientDashboard() {
             alt=""
             aria-hidden="true"
             loading="lazy"
-            className="pointer-events-none w-20 shrink-0 self-end select-none object-contain object-bottom sm:w-32 lg:w-44"
+            className="pointer-events-none w-28 shrink-0 self-end select-none object-contain object-bottom sm:w-36 lg:w-48"
           />
         </div>
 
