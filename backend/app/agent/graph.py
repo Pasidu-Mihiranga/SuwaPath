@@ -25,7 +25,8 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
@@ -43,18 +44,30 @@ from app.services import ai_orchestrator as ai
 
 logger = logging.getLogger(__name__)
 
-# Set by the API layer for the duration of a request. The graph needs a DB
-# session but LangGraph state must stay JSON-serialisable, so the session is
-# passed out-of-band rather than through the state dict.
-_SESSION_HOLDER: dict[str, Any] = {}
+# Agent nodes need database access, but LangGraph state must stay
+# JSON-serialisable, so a Session cannot live in the state dict.
+#
+# Crucially it also cannot be a single shared Session: LangGraph executes
+# fan-out branches on separate worker threads, and a SQLAlchemy Session is not
+# thread-safe — two agents querying concurrently raises "this session is
+# provisioning a new connection; concurrent operations are not permitted" and
+# the branch dies. Each node therefore opens its own short-lived Session from
+# the shared engine pool.
+@contextmanager
+def agent_session() -> Iterator[Any]:
+    """A private Session for one agent node, always closed."""
+    from app.core.db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
-def set_session(db) -> None:
-    _SESSION_HOLDER["db"] = db
-
-
-def _db():
-    return _SESSION_HOLDER.get("db")
+def set_session(db) -> None:  # noqa: ARG001 - kept for call-site compatibility
+    """No-op. Sessions are per-node now; see ``agent_session``."""
+    return None
 
 
 ROUTER_PROMPT = """You classify a patient's message for a healthcare assistant.
@@ -195,7 +208,6 @@ def dispatch(state: AgentState) -> list[Send]:
 def _run_agent(state: AgentState, route: str) -> dict:
     """Shared body for every agent node: tools, then a grounded reply."""
     started = time.perf_counter()
-    db = _db()
     scope = state.get("scope") or {}
     decision = state.get("_route") or {"route": route}
 
@@ -203,28 +215,34 @@ def _run_agent(state: AgentState, route: str) -> dict:
     structured: dict[str, Any] = {}
     tool_events: list[dict] = []
 
-    for tool_name in ROUTE_TOOLS.get(route, ()):
-        tool = TOOLS.get(tool_name)
-        if tool is None or db is None:
-            continue
-        tool_started = time.perf_counter()
-        try:
-            text, payload = tool(db, scope, question=state.get("user_text", ""))
-            tool_texts.append(text)
-            structured.update(payload)
-            tool_events.append({
-                "tool": tool_name,
-                "status": "ok",
-                "ms": int((time.perf_counter() - tool_started) * 1000),
-            })
-        except ToolDenied as exc:
-            # A consent refusal is a normal outcome, not an error. It is shown
-            # to the user as a boundary, and the reason never reaches the model.
-            tool_texts.append(f"[Access to {tool_name} is not permitted for this user.]")
-            tool_events.append({"tool": tool_name, "status": "denied", "detail": str(exc)})
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Tool %s failed: %s", tool_name, exc)
-            tool_events.append({"tool": tool_name, "status": "error"})
+    with agent_session() as db:
+        for tool_name in ROUTE_TOOLS.get(route, ()):
+            tool = TOOLS.get(tool_name)
+            if tool is None:
+                continue
+            tool_started = time.perf_counter()
+            try:
+                text, payload = tool(db, scope, question=state.get("user_text", ""))
+                tool_texts.append(text)
+                structured.update(payload)
+                tool_events.append({
+                    "tool": tool_name,
+                    "status": "ok",
+                    "ms": int((time.perf_counter() - tool_started) * 1000),
+                })
+            except ToolDenied as exc:
+                # A consent refusal is a normal outcome, not an error. It is
+                # shown to the user as a boundary, and the reason never
+                # reaches the model.
+                tool_texts.append(
+                    f"[Access to {tool_name} is not permitted for this user.]"
+                )
+                tool_events.append({
+                    "tool": tool_name, "status": "denied", "detail": str(exc),
+                })
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Tool %s failed: %s", tool_name, exc)
+                tool_events.append({"tool": tool_name, "status": "error"})
 
     answer = _synthesise(state, route, tool_texts)
 

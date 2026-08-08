@@ -9,6 +9,7 @@ import Login from "./pages/Login";
 
 import PatientDashboard from "./pages/patient/Dashboard";
 import SymptomCheck from "./pages/patient/SymptomCheck";
+import Assistant from "./pages/patient/Assistant";
 import FindCare from "./pages/patient/FindCare";
 import Programmes from "./pages/patient/Programmes";
 import { Imaging, Reports } from "./pages/patient/Records";
@@ -74,6 +75,7 @@ export default function App() {
       <Route element={<Protected roles={["patient"]} />}>
         <Route path="/patient" element={<PatientDashboard />} />
         <Route path="/patient/symptom-check" element={<SymptomCheck />} />
+        <Route path="/patient/assistant" element={<Assistant />} />
         <Route path="/patient/find-care" element={<FindCare />} />
         <Route path="/patient/appointments" element={<Appointments />} />
         <Route path="/patient/reports" element={<Reports />} />

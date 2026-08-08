@@ -132,66 +132,55 @@ async def agent_stream(
     async def events() -> AsyncIterator[str]:
         # Open the stream immediately so proxies don't buffer the first chunk.
         yield ": open\n\n"
-
-        # The graph runs sync SQLAlchemy, so it gets its own session on a
-        # worker thread rather than sharing the request-scoped one.
-        stream_db = SessionLocal()
-        set_session(stream_db)
         final: dict[str, Any] = {}
 
         try:
-            queue: asyncio.Queue = asyncio.Queue()
+            # astream() is used rather than stream() on a worker thread.
+            # LangGraph runs the sync nodes in its own executor and drives the
+            # event loop correctly; bridging a sync generator into asyncio by
+            # hand deadlocked once fan-out branches were involved.
+            async for update in agent_graph.astream(state, stream_mode="updates"):
+                for node, delta in update.items():
+                    final.update(
+                        {
+                            key: value
+                            for key, value in (delta or {}).items()
+                            if key not in ("trace", "agent_outputs")
+                        }
+                    )
+                    for entry in (delta or {}).get("trace", []) or []:
+                        final.setdefault("trace", []).append(entry)
+                    for entry in (delta or {}).get("agent_outputs", []) or []:
+                        final.setdefault("agent_outputs", []).append(entry)
 
-            def run() -> None:
-                try:
-                    for update in agent_graph.stream(state, stream_mode="updates"):
-                        for node, delta in update.items():
-                            queue.put_nowait(("node", node, delta))
-                            final.update(
-                                {k: v for k, v in (delta or {}).items() if k != "trace"}
-                            )
-                            for entry in (delta or {}).get("trace", []) or []:
-                                final.setdefault("trace", []).append(entry)
-                            for entry in (delta or {}).get("agent_outputs", []) or []:
-                                final.setdefault("agent_outputs", []).append(entry)
-                except Exception as exc:  # noqa: BLE001
-                    logger.exception("Agent stream failed")
-                    queue.put_nowait(("error", "graph", str(exc)))
-                finally:
-                    queue.put_nowait(None)
+                    if node == "route":
+                        selected = (delta or {}).get("routes", []) or []
+                        yield _sse({
+                            "type": "routes",
+                            "routes": [r["route"] for r in selected],
+                            "parallel": len(selected) > 1,
+                        })
 
-            asyncio.get_running_loop().run_in_executor(None, run)
-
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                kind, node, delta = item
-
-                if kind == "error":
-                    yield _sse({"type": "error", "detail": "Assistant failed."})
-                    continue
-
-                # One event per completed node, carrying that node's own trace.
-                for entry in (delta or {}).get("trace", []) or []:
-                    yield _sse({"type": "stage", "node": node, **entry})
-                    for tool in entry.get("tools", []) or []:
-                        yield _sse({"type": "tool", "node": node, **tool})
-
-                if node == "route":
-                    yield _sse({
-                        "type": "routes",
-                        "routes": [r["route"] for r in (delta or {}).get("routes", [])],
-                        "parallel": len((delta or {}).get("routes", [])) > 1,
-                    })
+                    # One event per completed node, carrying its own trace.
+                    for entry in (delta or {}).get("trace", []) or []:
+                        yield _sse({"type": "stage", "node": node, **entry})
+                        for tool in entry.get("tools", []) or []:
+                            yield _sse({"type": "tool", "node": node, **tool})
 
             yield _sse({"type": "final", **_response(state, final)})
+        except Exception:  # noqa: BLE001
+            logger.exception("Agent stream failed")
+            yield _sse({"type": "error", "detail": "The assistant failed."})
         finally:
+            # Audit on a private session: the request-scoped one may already be
+            # closed by the time the stream finishes.
+            audit_db = SessionLocal()
             try:
-                _audit(stream_db, current_user, state, final)
+                _audit(audit_db, current_user, state, final)
             except Exception:  # noqa: BLE001
                 logger.warning("Agent audit write failed", exc_info=True)
-            stream_db.close()
+            finally:
+                audit_db.close()
 
     return StreamingResponse(
         events(),
