@@ -210,7 +210,7 @@ flowchart TB
     PHI{{"PHI boundary<br/>minimise - pseudonymise - guard"}}:::guard
     LLM["Language model<br/>Groq / OpenRouter / Gemini"]:::ext
 
-    PG[("PostgreSQL<br/>41 tables")]:::store
+    PG[("PostgreSQL<br/>43 tables")]:::store
     QD[("Qdrant + MiniLM<br/>knowledge vectors")]:::store
 
     P --> UI
