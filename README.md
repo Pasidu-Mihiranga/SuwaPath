@@ -11,7 +11,7 @@
 From a symptom, a lab report or a medical image — to the right verified doctor,
 at a facility that can actually run the test you need.
 
-`FastAPI` · `PostgreSQL` · `LangGraph` · `Gemini` · `Qdrant` · `React` · `TypeScript` · `Tailwind`
+`FastAPI` · `PostgreSQL` · `LangGraph` · `Groq` · `Qdrant` · `React` · `TypeScript` · `Tailwind`
 
 Built for **AI Buildathon 2026** · Team **Gmora** · SDG 3 — Good Health and Well-Being
 
@@ -38,6 +38,8 @@ Built for **AI Buildathon 2026** · Team **Gmora** · SDG 3 — Good Health and 
 - [Plugging in your own CV model](#plugging-in-your-own-cv-model)
 - [Seeded dataset](#seeded-dataset)
 - [Privacy, consent and safety](#privacy-consent-and-safety)
+  - [Is PII masking enough?](#is-pii-masking-enough)
+  - [Private mode](#private-mode)
 - [What is real, and what is not](#what-is-real-and-what-is-not)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
@@ -73,6 +75,7 @@ demand forecast. It is one workflow, not five dashboards.
 
 | | |
 |---|---|
+| **One assistant, not three screens** | Symptoms, reports, appointments and the confidential pathway are a single conversation. It takes a history the way a doctor does — up to four targeted questions — before it says anything. |
 | **Multilingual symptom intake** | Conversational triage in **English, Sinhala and Tamil**. Sinhala input fires the exact same clinical rules as English — matching is on concepts, not translated strings. |
 | **Deterministic red-flag engine** | 24 clinician-style rules decide urgency. **The LLM never does.** Chest pain + breathlessness + sweating → `EMERGENCY`, every time, in any language. |
 | **Capability-aware matching** | The differentiator. Not just "a dermatologist near you", but a dermatologist at a facility that can perform the **skin biopsy** the recommendation calls for. |
@@ -81,7 +84,9 @@ demand forecast. It is one workflow, not five dashboards.
 | **Care programmes** | Maternal/postpartum with danger-sign check-ins, elderly care with medication adherence and pattern-based guardian alerts, and a confidential sexual-health pathway. |
 | **Consent-controlled guardians** | Deny-by-default. A guardian sees only what the patient explicitly granted, and withheld sections are shown as withheld rather than silently hidden. |
 | **Hospital intelligence** | No-show risk and 7-day specialty demand forecasting, both fitted on the hospital's own historical appointments. |
-| **Works without an API key** | No Gemini key? Every feature still runs on the deterministic engine. Nothing hard-fails in a demo. |
+| **Private mode** | A conversation whose message bodies are never written to the database at all. Resumable only with a 6-digit PIN, invisible in history, gone in 12 hours. |
+| **Answers before generating** | Greetings and product FAQs return reviewed answers from cache in ~0 ms. Nothing clinical is ever cached — near-identical questions have completely different correct answers. |
+| **Works without any API key** | Three model providers are tried in order and none is required. With none set, every feature still runs on deterministic engines and composers. Nothing hard-fails in a demo. |
 
 ---
 
@@ -89,31 +94,50 @@ demand forecast. It is one workflow, not five dashboards.
 
 ### The LLM never decides urgency
 
-This is the load-bearing safety property. Gemini does language work — asking
-natural follow-up questions, extracting structure, explaining findings in plain
-language. A separate deterministic engine decides the care level, and it
+This is the load-bearing safety property. A language model does language work
+— asking natural follow-up questions, extracting structure, explaining findings
+in plain language. A separate deterministic engine decides the care level, and it
 **re-derives symptom concepts from the patient's own words** rather than
 trusting the model's symptom list. A hallucinated or omitted symptom therefore
 cannot change the care level.
 
-LangGraph makes this a structural property rather than a convention:
+LangGraph makes this a structural property rather than a convention. The
+red-flag engine runs over the accumulated transcript on **every** turn of a
+consultation, before the assistant decides whether to ask another question or
+answer:
 
-```
-              ┌─ knowledge  ──────────────► END
-              ├─ web_search ──────────────► END
-route ────────┼─ handoff (doc / image) ───► END
-              └─ symptom_intake
-                     │ (enough history?)
-                     ├─ no ──────────────► END   (ask another question)
-                     └─ yes
-                         ▼
-              extract ─► red_flag ─► navigate ─► match ─► END
-                         ▲
-                  deterministic — no model call
+```mermaid
+flowchart TB
+    T["Everything the patient<br/>has said so far"]:::role --> RF["red-flag engine<br/>24 rules, no model call"]:::det
+    RF --> Q{"emergency?"}:::det
+    Q -->|yes| ESC["Escalate now.<br/>Stop asking questions."]:::stop
+    Q -->|no| E{"enough history?"}:::det
+    E -->|no| ASK["Ask the one question that<br/>best separates the candidates"]:::ai
+    E -->|yes| ASSESS["Assess: what fits, what argues<br/>against, what test settles it"]:::ai
+    ASK --> T
+    ASSESS --> NAV["navigate → match →<br/>doctor, facility, tests"]:::det
+
+    classDef role fill:#ecfdff,stroke:#0090b0,color:#0a2e56
+    classDef det fill:#ecfdf3,stroke:#16a34a,color:#05603a
+    classDef ai fill:#f6f4ff,stroke:#7c5cff,color:#5b21b6
+    classDef stop fill:#fef3f2,stroke:#dc2626,color:#912018
 ```
 
-Nothing can reach `navigate` without traversing `red_flag`. Every symptom
-session returns its orchestration trace, so the path taken is visible in the UI.
+Nothing reaches `navigate` without traversing the red-flag engine, and a
+patient who mentions crushing chest pain on turn one is not asked three more
+questions first. Every session returns its orchestration trace, so the path
+taken is visible in the UI as it happens.
+
+### Assist, and say so
+
+SuwaPath is the step before the clinic, and the output says that plainly. An
+assessment names what fits *and what argues against it*, suggests the tests
+that would actually settle the question, and ends by stating that it cannot be
+certain without an examination.
+
+That last part is not legal boilerplate. An assistant that sounds certain is
+one patients stop verifying — and the entire value of routing someone to the
+right specialist evaporates if they decide they no longer need to go.
 
 ### Multilingual by concept, not translation
 
@@ -184,7 +208,7 @@ flowchart TB
     end
 
     PHI{{"PHI boundary<br/>minimise - pseudonymise - guard"}}:::guard
-    LLM["Google Gemini"]:::ext
+    LLM["Language model<br/>Groq / OpenRouter / Gemini"]:::ext
 
     PG[("PostgreSQL<br/>41 tables")]:::store
     QD[("Qdrant + MiniLM<br/>knowledge vectors")]:::store
@@ -229,20 +253,24 @@ and deterministically. The language model handles language, not judgement.
 flowchart LR
     START(( )) --> GI["guard_input<br/>deterministic"]:::det
     GI -->|blocked or crisis| E1(("end")):::stop
-    GI --> R["route<br/>multi-intent"]:::ai
+    GI --> CA["cache_lookup<br/>reviewed answers"]:::det
+    CA -->|hit| J
+    CA --> R["route<br/>multi-intent"]:::ai
     R --> FAN{{"fan-out<br/>Send()"}}:::ai
 
-    FAN --> CA["clinical_agent"]:::ai
-    FAN --> AA["admin_agent"]:::ai
-    FAN --> RA["records_agent"]:::ai
-    FAN --> KA["knowledge_agent"]:::ai
-    FAN --> DA["direct_agent"]:::ai
+    FAN --> C1["consult_agent"]:::ai
+    FAN --> C2["admin_agent"]:::ai
+    FAN --> C3["records_agent"]:::ai
+    FAN --> C4["knowledge_agent"]:::ai
+    FAN --> C5["web_agent"]:::ai
+    FAN --> C6["direct_agent"]:::ai
 
-    CA --> M["merge<br/>operator.add fan-in"]:::ai
-    AA --> M
-    RA --> M
-    KA --> M
-    DA --> M
+    C1 --> M["merge<br/>operator.add fan-in"]:::ai
+    C2 --> M
+    C3 --> M
+    C4 --> M
+    C5 --> M
+    C6 --> M
     M --> J["judge<br/>deterministic"]:::det
     J --> E2(("end")):::stop
 
@@ -251,19 +279,65 @@ flowchart LR
     classDef stop fill:#f2f6fb,stroke:#4a75a3,color:#0a2e56
 ```
 
-"Is my appointment still on, and what did my blood test mean?" is two
-questions. The router splits it and `Send()` dispatches both agents in one
-superstep, so they run at the same time rather than one after the other. Each
-returns a single-element list and the `operator.add` reducer on `agent_outputs`
-concatenates them on fan-in — without that reducer the concurrent writes would
-conflict and one agent's work would be dropped silently.
+**One conversation, not three.** Symptom checking, record explanation and the
+confidential advisor used to be separate screens that could not see each
+other. They are one chat now: the same turn can take a history, read a lab
+value and offer a doctor.
 
-The router falls back to deterministic multi-intent keyword splitting when the
-model is unavailable, so fan-out still happens with zero API quota.
+**`cache_lookup` answers before generating.** Greetings and product FAQs are
+matched by normalised text and by embedding similarity against reviewed
+answers, and returned in ~0 ms without touching a model. This is a safety
+feature as much as a speed one — the answer to "is my data private?" must be
+identical every time. Nothing clinical is ever cached: two patients asking
+"is this chest pain serious?" produce near-identical embeddings and completely
+different correct answers.
 
-`judge` may soften or block an answer. It can never raise urgency — that stays
-with the deterministic red-flag engine. If a judge could escalate, a prompt
+**`consult_agent` takes a history.** Rather than answering the first sentence,
+it asks up to four questions, each chosen to discriminate between the
+explanations still in play, then writes an assessment: what fits, what argues
+against it, which test would settle it, and who to see. A red-flag hit stops
+question-asking immediately.
+
+**Parallel fan-out.** "Is my appointment still on, and what did my blood test
+mean?" is two questions. The router splits it and `Send()` dispatches both
+agents in one superstep. Each returns a single-element list and the
+`operator.add` reducer on `agent_outputs` concatenates them on fan-in —
+without that reducer the concurrent writes would conflict and one agent's work
+would be dropped silently.
+
+Routes are then pruned: `direct` is dropped whenever anything substantive was
+also selected, and a reply to our own follow-up question stays on `consult`
+alone. Left unpruned, an empty catch-all answer gets merged into a good one
+and the reply contradicts itself.
+
+The router falls back to deterministic multi-intent keyword splitting when no
+provider answers, so fan-out still happens with zero API quota.
+
+**`judge` may soften or block. It can never raise urgency** — that stays with
+the deterministic red-flag engine. If a judge could escalate, a prompt
 injection would become a way to manufacture emergencies.
+
+### Language models: three providers, none required
+
+No single free tier is reliable enough to build on, so three are tried in
+order and each may fail independently:
+
+| Order | Provider | Model | Measured |
+| --- | --- | --- | --- |
+| 1 | Groq | `llama-3.3-70b-versatile` / `llama-3.1-8b-instant` | 160–450 ms |
+| 2 | OpenRouter | `nvidia/nemotron-3-ultra-550b-a55b:free` | 1.3–3 s |
+| 3 | Gemini | `gemini-2.0-flash` | free keys are often provisioned `limit: 0` |
+| — | none | deterministic composers | always available |
+
+A provider that fails is put on a 60-second cooldown rather than retried on
+every request, so one dead key does not add its timeout to every turn. A
+`400` is treated as our own malformed request and does **not** earn a
+cooldown — punishing a healthy provider for our bug would push every
+subsequent turn to a slower fallback.
+
+With no key at all the product still works end to end. The deterministic
+composers write structured markdown from the engines' own output rather than
+dumping raw tool text, so a quota outage degrades the wording and nothing else.
 
 ### What crosses the PHI boundary
 
@@ -277,7 +351,7 @@ flowchart LR
     LOCAL -->|"red flags - OCR<br/>imaging - confidential"| NEVER["never leaves<br/>this machine"]:::det
     LOCAL -->|no| PSE["2 - Pseudonymise<br/>names become PERSON_A7"]:::guard
     PSE --> EG["3 - Egress guard<br/>block on any identifier"]:::guard
-    EG -->|pass| LLM["Gemini"]:::ext
+    EG -->|pass| LLM["Language model"]:::ext
     EG -->|fail| BLOCK["blocked and audited"]:::stop
     LLM --> RE["4 - Rehydrate + judge<br/>names restored locally"]:::guard
     RE --> USER["Patient"]:::role
@@ -336,7 +410,8 @@ seen from five angles — not five disconnected dashboards.
 **Backend** — Python 3.12 · FastAPI · SQLAlchemy 2 · PostgreSQL 16 · PyJWT ·
 bcrypt
 
-**AI** — LangGraph (orchestration graph) · Google Gemini (language) ·
+**AI** — LangGraph (orchestration graph) · Groq / OpenRouter / Gemini with
+automatic failover (language) ·
 Qdrant + `fastembed` MiniLM ONNX (semantic knowledge retrieval) ·
 PyMuPDF + Tesseract (OCR) · onnxruntime (computer vision)
 
@@ -351,61 +426,146 @@ inspectable.
 
 ## Getting started
 
+No Docker is needed for local development. Everything runs natively: the only
+service is PostgreSQL, and the vector store is an embedded on-disk Qdrant that
+starts with the process. Containers are for deployment later, not for getting
+this running today.
+
 ### Prerequisites
 
-| Requirement | Version | Notes |
-|---|---|---|
-| Python | 3.12+ | |
-| Node.js | 20+ | |
-| PostgreSQL | 16 | |
-| Tesseract OCR | 5+ | Required for scanned-document OCR |
+| Requirement | Version | Why |
+| --- | --- | --- |
+| Python | 3.12+ | Backend |
+| Node.js | 20+ | Frontend |
+| PostgreSQL | 16+ | The only external service |
+| Tesseract OCR | 5+ | Only for scanned documents without a text layer |
+
+<details open>
+<summary><b>macOS</b></summary>
 
 ```bash
-brew install postgresql@16 tesseract     # macOS
-# sudo apt install postgresql-16 tesseract-ocr   # Debian/Ubuntu
+brew install postgresql@16 tesseract node python@3.12
+brew services start postgresql@16
+```
+</details>
+
+<details>
+<summary><b>Linux (Debian / Ubuntu)</b></summary>
+
+```bash
+sudo apt update
+sudo apt install -y postgresql-16 tesseract-ocr python3.12 python3.12-venv nodejs npm
+sudo systemctl start postgresql
 ```
 
-### 1 · Start PostgreSQL
+On Fedora / RHEL: `sudo dnf install postgresql-server tesseract python3.12 nodejs`
+then `sudo postgresql-setup --initdb && sudo systemctl start postgresql`.
+</details>
+
+<details>
+<summary><b>Windows</b></summary>
+
+Using [winget](https://learn.microsoft.com/windows/package-manager/):
+
+```powershell
+winget install PostgreSQL.PostgreSQL.16
+winget install UB-Mannheim.TesseractOCR
+winget install OpenJS.NodeJS.LTS
+winget install Python.Python.3.12
+```
+
+Two Windows-specific notes:
+
+- Add Tesseract to `PATH` (typically `C:\Program Files\Tesseract-OCR`), or
+  set `TESSERACT_CMD` in `.env` to its full path.
+- The PostgreSQL installer runs the server on port **5432** by default, not
+  5436. Set `DATABASE_URL` accordingly — see step 1.
+
+WSL2 works too, and if you use it, follow the Linux instructions inside it.
+</details>
+
+### 1 · Create the database
+
+The default `DATABASE_URL` points at port **5436**, which is what this
+project's Homebrew instance was configured with. Most installations use
+**5432** — check yours and edit `.env` rather than reconfiguring PostgreSQL.
+
+<details open>
+<summary><b>macOS / Linux</b></summary>
+
+```bash
+createdb -h 127.0.0.1 -p 5436 suwapath
+```
+</details>
+
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
+```powershell
+& "C:\Program Files\PostgreSQL\16\bin\createdb.exe" -h 127.0.0.1 -p 5432 -U postgres suwapath
+```
+</details>
+
+<details>
+<summary>PostgreSQL won't start on macOS</summary>
+
+If the postmaster exits immediately, start it with `LC_ALL=C`. Homebrew's
+build can become multithreaded during locale initialisation and refuses to
+boot:
 
 ```bash
 LC_ALL=C pg_ctl -D /opt/homebrew/var/postgresql@16 start
-createdb -h 127.0.0.1 -p 5436 suwapath
 ```
-
-> **Two notes.** `LC_ALL=C` works around a macOS/Homebrew issue where the
-> postmaster becomes multithreaded during startup and refuses to boot. Port
-> `5436` is what this Homebrew instance is configured to use — check
-> `postgresql.conf` and adjust `DATABASE_URL` if yours differs.
-
-Prefer containers? `docker compose up -d` starts PostgreSQL and Qdrant; then
-point `DATABASE_URL` and `QDRANT_URL` at them.
+</details>
 
 ### 2 · Backend
 
-> **Stay inside `backend/` for every command below.** The venv lives at
-> `backend/.venv`, so running `.venv/bin/python` from the repo root (or any
-> other directory) fails with `no such file or directory`. If you `cd` away
-> to run something else — `brew install`, `docker compose`, editing `.env` —
-> `cd backend` again before the next command here.
+> **Every command below runs from inside `backend/`.** The virtualenv lives at
+> `backend/.venv`, so `.venv/bin/python` from the repo root fails with
+> `no such file or directory`. If you `cd` away for anything, `cd backend`
+> again before continuing.
+
+<details open>
+<summary><b>macOS / Linux</b></summary>
 
 ```bash
 cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-cp ../.env.example ../.env          # then add GEMINI_API_KEY
+cp ../.env.example ../.env          # then add your API keys — all optional
 
 PYTHONPATH=. .venv/bin/python -m app.seed.seeder --reset
 PYTHONPATH=. .venv/bin/uvicorn app.main:app --port 8000
 ```
+</details>
 
-Seeding takes ~15 seconds and prints the demo accounts when it finishes.
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
+```powershell
+cd backend
+py -3.12 -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+
+Copy-Item ..\.env.example ..\.env   # then add your API keys — all optional
+
+$env:PYTHONPATH = "."
+.venv\Scripts\python -m app.seed.seeder --reset
+.venv\Scripts\uvicorn app.main:app --port 8000
+```
+</details>
+
+Seeding takes about 15 seconds and prints the demo accounts when it finishes.
+The first run also downloads the ~90 MB MiniLM embedding model.
 
 - API: <http://127.0.0.1:8000>
 - Interactive docs: <http://127.0.0.1:8000/docs>
-- Health + AI status: <http://127.0.0.1:8000/health>
+- Health and provider status: <http://127.0.0.1:8000/health>
 
 ### 3 · Frontend
+
+Identical on all three platforms:
 
 ```bash
 cd frontend
@@ -434,11 +594,21 @@ All configuration is environment-driven. Copy `.env.example` to `.env`.
 |---|---|---|
 | `DATABASE_URL` | local socket, port 5436 | PostgreSQL connection |
 | `JWT_SECRET` | dev value | **Change before any deployment** |
-| `GEMINI_API_KEY` | *(empty)* | Enables the live orchestrator. Without it, deterministic fallbacks run. |
+| `GROQ_API_KEY` | *(empty)* | First-choice model provider. Fastest free tier by a wide margin. |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Used for answers |
+| `GROQ_FAST_MODEL` | `llama-3.1-8b-instant` | Used for routing and classification |
+| `OPEN_ROUTER_API_KEY` | *(empty)* | Second choice. Free model slugs. |
+| `OPEN_ROUTER_MODEL` | `nvidia/nemotron-3-ultra-550b-a55b:free` | Model id |
+| `GEMINI_API_KEY` | *(empty)* | Third choice |
 | `GEMINI_MODEL` | `gemini-2.0-flash` | Model id |
-| `TAVILY_API_KEY` | *(empty)* | Optional. Current public information only — never clinical decisions. |
+| `TAVILY_API_KEY` | *(empty)* | Optional web search. Current public information only — never clinical decisions. |
 | `QDRANT_URL` | *(empty)* | Empty ⇒ embedded on-disk Qdrant in `backend/storage/qdrant` |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Retrieval embeddings |
+
+**Every model key is optional.** With none of them set the platform still runs
+end to end on its deterministic composers — see
+[the provider table](#language-models-three-providers-none-required). Setting
+just `GROQ_API_KEY` gets you the best latency for the least effort.
 
 Check what is actually live at runtime:
 
@@ -735,6 +905,52 @@ hard-coded flag.
 - **Every AI output carries** a recommendation, a reason, a confidence and a
   suggested next action.
 
+### Is PII masking enough?
+
+No — and treating it as the answer is the common mistake. Masking is the
+*last* layer in `app/privacy/boundary.py`, not the first. Three cheaper layers
+sit in front of it:
+
+1. **Don't send it.** Four capabilities are local-only and never call a hosted
+   model at all: red-flag assessment, OCR extraction, image analysis, and
+   anything in a confidential session.
+2. **Send less.** Each route has a field allowlist. The consult route sees age
+   *band*, sex, pregnancy status and symptoms; it never sees name, email, NIC
+   or coordinates, because those fields are not in its allowlist to begin with.
+3. **Enforce it at the query, not the prompt.** Guardian consent is checked in
+   the SQL, so a tool cannot return data the guardian was not granted. A model
+   that is never given the data cannot be talked into revealing it.
+4. **Then mask, then verify.** Names become stable pseudonyms, and an egress
+   guard scans the final payload for identifiers. A hit blocks the call and
+   audits it rather than sending it.
+
+### Private mode
+
+For a conversation about an STI, an unplanned pregnancy or mental health, the
+realistic threat is not a database attacker — it is a shared phone and a
+family member. So a private session stores **no message bodies at all**. Not
+encrypted, not hashed: never written. The row holds a session id, an owner, a
+PBKDF2 PIN verifier and an expiry; the transcript lives in process memory and
+is gone in 12 hours.
+
+It does not appear in the history list, its title is never derived from its
+content, and five wrong PINs destroy it rather than locking it. Losing the PIN
+means losing the conversation — that is the feature, not a gap.
+
+### The honest caveat
+
+Free model tiers generally reserve the right to train on submitted content.
+That makes them unsuitable for real patient data regardless of how good the
+controls above are, so **every record in this repository is synthetic**.
+`GET /api/v1/agent/status` reports this rather than hiding it:
+
+```json
+{ "privacy": { "safe_for_real_phi": false, "current_data": "synthetic" } }
+```
+
+Production would need a paid zero-retention endpoint or a self-hosted model.
+The boundary code does not change; only the egress destination does.
+
 ---
 
 ## What is real, and what is not
@@ -751,7 +967,12 @@ An honest inventory, because "works end to end" should mean something.
 | No-show prediction | **Real** — logistic regression fitted on seeded history; recovers the generative signal |
 | Demand forecasting | **Real** — level + trend + weekday seasonality vs actual schedule capacity |
 | Knowledge retrieval | **Real** — Qdrant + MiniLM ONNX embeddings over a 30-document curated corpus |
-| Gemini orchestration | **Real when `GEMINI_API_KEY` is set** — deterministic fallback otherwise |
+| Assistant conversation | **Real** — LangGraph fan-out, doctor-style history taking, cached FAQ answers |
+| Guardrails and output judge | **Real** — deterministic, both sides of the graph; urgency never model-set |
+| PHI boundary | **Real** — per-route allowlist, pseudonymisation, egress guard, audit |
+| Private chat | **Real** — message bodies never written to the database; PBKDF2 PIN, self-destruct on brute force |
+| Web search | **Real when `TAVILY_API_KEY` is set** — domain-ranked, dosing text stripped |
+| Model wording | **Real when any provider key is set** — deterministic composers otherwise |
 | **Pneumonia CV model** | **Baseline placeholder** — see below |
 
 ### The computer-vision model
@@ -817,10 +1038,28 @@ PDFs do not need it; scanned images do.
 </details>
 
 <details>
-<summary><b>"Gemini: fallback" in /health</b></summary>
+<summary><b>Answers read plainly / <code>"fallback_mode": true</code> in /health</b></summary>
 
-Expected when `GEMINI_API_KEY` is unset. Everything still works — conversation
-wording is scripted rather than generated. Add the key and restart.
+No model provider answered, so the deterministic composers wrote the reply.
+Everything still works; the wording is plainer. Check which providers are
+configured and healthy:
+
+```bash
+curl -s localhost:8000/api/v1/agent/status -H "Authorization: Bearer $TOKEN" | jq .orchestrator.llm
+```
+
+Common causes, in the order worth checking:
+
+- **No key set.** Add `GROQ_API_KEY` — it is the fastest free tier and the
+  first one tried.
+- **`cooling_down` lists a provider.** It failed recently and is skipped for
+  60 seconds. This is normal on free tiers and clears itself.
+- **Gemini returns 429 with `limit: 0`.** The key authenticates but the project
+  has no free-tier quota allocated. This is not a quota you have exhausted —
+  it was never granted. Use Groq or OpenRouter instead.
+- **OpenRouter returns "unavailable for free".** Free model slugs are retired
+  regularly. Pick a current one from
+  <https://openrouter.ai/models?max_price=0> and set `OPEN_ROUTER_MODEL`.
 </details>
 
 <details>
