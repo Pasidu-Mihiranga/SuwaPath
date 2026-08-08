@@ -119,6 +119,12 @@ export default function Assistant() {
   const [showHistory, setShowHistory] = useState(false);
   const [pinPrompt, setPinPrompt] = useState(false);
   const [pin, setPin] = useState("");
+  // Reopening a private chat needs its code as well as its PIN: private
+  // sessions are deliberately absent from history, so there is nothing to
+  // click on and the code is the only handle the user has.
+  const [resumePrompt, setResumePrompt] = useState(false);
+  const [resumeCode, setResumeCode] = useState("");
+  const [resumePin, setResumePin] = useState("");
   const [booking, setBooking] = useState<ProviderCard | null>(null);
   const [uploading, setUploading] = useState(false);
   const [listening, setListening] = useState(false);
@@ -203,6 +209,38 @@ export default function Assistant() {
       setPin("");
     } catch (err) {
       setError(errorMessage(err, "Could not start a private chat."));
+    }
+  }
+
+  async function resumePrivate() {
+    const code = resumeCode.trim();
+    if (!code || !/^\d{6}$/.test(resumePin)) {
+      setError("Enter the chat code and its 6-digit PIN.");
+      return;
+    }
+    try {
+      const { data } = await api.post("/agent/sessions/resume", {
+        session_id: code,
+        pin: resumePin,
+      });
+      setTurns(
+        (data.messages ?? []).map((m: any) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      );
+      setSessionId(data.id);
+      setIsPrivate(true);
+      setShowHistory(false);
+      setResumePrompt(false);
+      setResumeCode("");
+      setResumePin("");
+      setError(null);
+    } catch (err) {
+      // The server counts failed attempts and destroys the chat after too
+      // many, so its message is the one that matters — surface it verbatim.
+      setError(errorMessage(err, "That chat could not be reopened."));
+      setResumePin("");
     }
   }
 
@@ -514,6 +552,14 @@ export default function Assistant() {
             <Icon name="lock" size={16} />
             Private chat
           </button>
+          {/* Private chats are absent from the list below, so this is the only
+              way back into one. */}
+          <button
+            onClick={() => setResumePrompt(true)}
+            className="sp-btn sp-btn-ghost mt-1 w-full justify-center text-sm"
+          >
+            Resume a private chat
+          </button>
 
           <p className="mb-1.5 mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
             Recent
@@ -585,16 +631,37 @@ export default function Assistant() {
         </div>
 
         {isPrivate && (
-          <div className="flex items-start gap-2.5 border-b border-programme-border bg-programme-surface px-4 py-2">
+          <div className="flex flex-wrap items-start gap-2.5 border-b border-programme-border bg-programme-surface px-4 py-2">
             <Icon
               name="lock"
               size={15}
               className="mt-0.5 shrink-0 text-programme-text"
             />
             <p className="text-xs text-programme-text">
-              Nothing here is saved to your history, and only your PIN can
-              reopen it. It disappears after 12 hours.
+              Nothing here is saved to your history. It disappears after 12
+              hours, and reopening it needs the code below with your PIN —
+              neither can be recovered.
             </p>
+            {/* The code has to be visible somewhere. A private chat is absent
+                from history by design, so without it there is no route back
+                into the conversation and the PIN alone is not enough. */}
+            {sessionId && (
+              <div className="flex w-full items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-programme-text">
+                  Chat code
+                </span>
+                <code className="select-all rounded bg-surface/80 px-2 py-1 text-xs text-ink-800">
+                  {sessionId}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard?.writeText(sessionId)}
+                  className="sp-btn sp-btn-ghost sp-btn-sm"
+                >
+                  Copy
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -709,6 +776,21 @@ export default function Assistant() {
             setPin("");
           }}
           onConfirm={startPrivate}
+        />
+      )}
+
+      {resumePrompt && (
+        <ResumeDialog
+          code={resumeCode}
+          setCode={setResumeCode}
+          pin={resumePin}
+          setPin={setResumePin}
+          onCancel={() => {
+            setResumePrompt(false);
+            setResumeCode("");
+            setResumePin("");
+          }}
+          onConfirm={() => void resumePrivate()}
         />
       )}
 
@@ -1327,6 +1409,89 @@ function PinDialog({
             className="sp-btn sp-btn-primary flex-1 justify-center"
           >
             Start
+          </button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Reopening a private chat.
+ *
+ * Takes the code as well as the PIN. The PIN alone cannot identify a
+ * conversation — private sessions are excluded from history precisely so that
+ * nothing points at them — so the code is what names the chat and the PIN is
+ * what proves it is yours.
+ *
+ * Wrong PINs are counted server-side and the conversation is destroyed after
+ * too many, so the warning below is a statement of fact, not a deterrent.
+ */
+function ResumeDialog({
+  code,
+  setCode,
+  pin,
+  setPin,
+  onCancel,
+  onConfirm,
+}: {
+  code: string;
+  setCode: (v: string) => void;
+  pin: string;
+  setPin: (v: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/50 p-4">
+      <Card className="w-full max-w-sm">
+        <div className="flex items-start gap-3">
+          <span className="sp-icon-tile bg-programme-surface text-programme-text">
+            <Icon name="lock" size={20} />
+          </span>
+          <div className="min-w-0">
+            <h2 className="font-semibold text-ink-900">Resume a private chat</h2>
+            <p className="mt-1 text-sm text-ink-600">
+              Enter the chat code you saved and its PIN. Too many wrong PINs
+              will delete the conversation.
+            </p>
+          </div>
+        </div>
+
+        <label className="sp-field mt-4">Chat code</label>
+        <input
+          className="sp-input"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Paste the code you saved"
+          value={code}
+          onChange={(event) => setCode(event.target.value.trim())}
+        />
+
+        <label className="sp-field mt-3">PIN</label>
+        <input
+          className="sp-input text-center text-lg tracking-[0.4em]"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={6}
+          placeholder="••••••"
+          value={pin}
+          onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+        />
+
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={onCancel}
+            className="sp-btn sp-btn-ghost flex-1 justify-center"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!code.trim() || pin.length !== 6}
+            className="sp-btn sp-btn-primary flex-1 justify-center"
+          >
+            Reopen
           </button>
         </div>
       </Card>
