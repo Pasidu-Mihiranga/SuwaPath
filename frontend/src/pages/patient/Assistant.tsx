@@ -1,24 +1,36 @@
 /**
- * SuwaPath Assistant — agent chat with a live chain of thought.
+ * SuwaPath Assistant — the centre of the product.
  *
- * The status chips are driven by *real* Server-Sent Events from the agent
- * graph, not a timed animation: each chip appears when its node actually
- * completes, so parallel agents show up side by side and tool calls report
- * their true status (including consent denials).
+ * Everything a patient does starts here: describing a symptom, understanding a
+ * report, finding a doctor, asking a general question. The separate symptom
+ * checker and confidential advisor were three half-conversations that could
+ * not see each other; this is one conversation that can do all three.
+ *
+ * Three things are surfaced that a chat UI usually hides, because in a medical
+ * product they are part of the answer:
+ *
+ * - **How it was produced.** Cache hit, which model, how long it took. If an
+ *   answer came from a reviewed cached response rather than a model, the
+ *   patient can see that.
+ * - **What it did.** The chain-of-thought chips are real SSE node events, not
+ *   an animation — including consent denials, shown as a boundary rather than
+ *   an error.
+ * - **Whether it is private.** Private mode is visibly different, not a
+ *   setting buried in a menu.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown from "../../components/Markdown";
 import {
-  AiNotice,
   Card,
   Chip,
-  Empty,
   ErrorNote,
   Icon,
-  PageHeader,
+  UrgencyBadge,
+  relativeDay,
   type IconName,
 } from "../../components/ui";
-import { API_BASE, tokens } from "../../lib/api";
+import { API_BASE, api, errorMessage, tokens } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 
 interface Turn {
@@ -27,27 +39,50 @@ interface Turn {
   routes?: string[];
   guard?: Record<string, any>;
   structured?: Record<string, any>;
+  citations?: any[];
+  consult?: Record<string, any>;
+  cache?: { hit?: boolean; key?: string; score?: number };
+  latencyMs?: number;
+  provider?: string;
+}
+
+interface SessionSummary {
+  id: string;
+  title: string;
+  is_private: boolean;
+  message_count: number;
+  last_message_at: string | null;
 }
 
 interface TraceItem {
   id: string;
-  kind: "stage" | "tool" | "routes";
   label: string;
   detail?: string;
-  status: "running" | "ok" | "denied" | "error";
+  status: "ok" | "denied" | "error";
   ms?: number;
 }
 
 const NODE_LABEL: Record<string, { label: string; icon: IconName }> = {
   guard_input: { label: "Safety check", icon: "shield" },
+  cache_lookup: { label: "Checking known answers", icon: "bolt" },
   route: { label: "Understanding your question", icon: "ai" },
-  clinical_agent: { label: "Clinical assistant", icon: "stethoscope" },
-  admin_agent: { label: "Appointments assistant", icon: "calendar" },
-  records_agent: { label: "Records assistant", icon: "description" },
+  consult_agent: { label: "Clinical reasoning", icon: "stethoscope" },
+  admin_agent: { label: "Appointments", icon: "calendar" },
+  records_agent: { label: "Your records", icon: "description" },
   knowledge_agent: { label: "Health knowledge", icon: "lab" },
+  web_agent: { label: "Current sources", icon: "search" },
   direct_agent: { label: "Assistant", icon: "chat" },
   merge: { label: "Combining answers", icon: "link" },
   judge: { label: "Answer safety review", icon: "verified" },
+};
+
+const ROUTE_LABEL: Record<string, string> = {
+  consult: "Clinical reasoning",
+  admin: "Appointments",
+  records: "Your records",
+  knowledge: "Health knowledge",
+  web: "Current sources",
+  direct: "General",
 };
 
 const TOOL_LABEL: Record<string, string> = {
@@ -57,13 +92,14 @@ const TOOL_LABEL: Record<string, string> = {
   medications: "Read medications",
   knowledge: "Search health knowledge",
   recommendation: "Read recommendation",
+  web_search: "Search reputable sources",
 };
 
 const SUGGESTIONS = [
-  "What are my upcoming appointments?",
-  "Is my next appointment still on, and what did my blood test mean?",
-  "What does low haemoglobin mean?",
+  "I've had a headache for three days",
+  "Explain my latest blood test",
   "Find me a dermatologist nearby",
+  "Is there a dengue outbreak right now?",
 ];
 
 export default function Assistant() {
@@ -74,11 +110,86 @@ export default function Assistant() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [pinPrompt, setPinPrompt] = useState(false);
+  const [pin, setPin] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+
+  const loadSessions = useCallback(async () => {
+    try {
+      const { data } = await api.get("/agent/sessions");
+      setSessions(data.sessions ?? []);
+    } catch {
+      /* history is a convenience; a failure here must not block chatting */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, trace]);
+
+  function reset(privateMode: boolean) {
+    setTurns([]);
+    setTrace([]);
+    setSessionId(null);
+    setError(null);
+    setIsPrivate(privateMode);
+    setShowHistory(false);
+  }
+
+  async function openSession(id: string) {
+    try {
+      const { data } = await api.get(`/agent/sessions/${id}`);
+      setTurns(
+        (data.messages ?? []).map((m: any) => ({
+          role: m.role,
+          content: m.content,
+          routes: m.meta?.routes,
+          latencyMs: m.meta?.latency_ms,
+          provider: m.meta?.provider,
+          cache: { hit: m.meta?.cache_hit },
+        })),
+      );
+      setSessionId(id);
+      setIsPrivate(false);
+      setShowHistory(false);
+      setError(null);
+    } catch (err) {
+      setError(errorMessage(err, "That conversation could not be opened."));
+    }
+  }
+
+  async function deleteSession(id: string) {
+    try {
+      await api.delete(`/agent/sessions/${id}`);
+      if (id === sessionId) reset(false);
+      void loadSessions();
+    } catch (err) {
+      setError(errorMessage(err, "Could not delete that conversation."));
+    }
+  }
+
+  async function startPrivate() {
+    if (!/^\d{6}$/.test(pin)) {
+      setError("Please choose a 6-digit PIN.");
+      return;
+    }
+    try {
+      const { data } = await api.post("/agent/sessions", { private: true, pin });
+      reset(true);
+      setSessionId(data.id);
+      setPinPrompt(false);
+      setPin("");
+    } catch (err) {
+      setError(errorMessage(err, "Could not start a private chat."));
+    }
+  }
 
   async function send(message: string) {
     const text = message.trim();
@@ -129,20 +240,29 @@ export default function Assistant() {
       );
     } finally {
       setBusy(false);
+      void loadSessions();
     }
   }
 
   function handleEvent(event: any) {
+    if (event.type === "session") {
+      setSessionId(event.session_id);
+      setIsPrivate(Boolean(event.private));
+      return;
+    }
+
     if (event.type === "routes") {
+      if (!event.routes?.length) return;
       setTrace((previous) => [
         ...previous,
         {
           id: `routes-${previous.length}`,
-          kind: "routes",
           label: event.parallel
             ? `Running ${event.routes.length} assistants in parallel`
-            : "Selected assistant",
-          detail: event.routes.join(", "),
+            : ROUTE_LABEL[event.routes[0]] ?? event.routes[0],
+          detail: event.parallel
+            ? event.routes.map((r: string) => ROUTE_LABEL[r] ?? r).join(", ")
+            : undefined,
           status: "ok",
         },
       ]);
@@ -152,14 +272,23 @@ export default function Assistant() {
     if (event.type === "stage") {
       const meta = NODE_LABEL[event.node];
       if (!meta) return;
+      // A cache miss is an internal detail, not a step worth narrating.
+      if (event.node === "cache_lookup" && event.hit === false) return;
       setTrace((previous) => [
         ...previous,
         {
           id: `${event.node}-${previous.length}`,
-          kind: "stage",
           label: meta.label,
-          detail: event.verdict && event.verdict !== "allow" ? event.verdict : undefined,
-          status: event.verdict === "block" || event.verdict === "crisis" ? "denied" : "ok",
+          detail:
+            event.verdict && event.verdict !== "allow"
+              ? event.verdict
+              : event.hit
+                ? "known answer"
+                : undefined,
+          status:
+            event.verdict === "block" || event.verdict === "crisis"
+              ? "denied"
+              : "ok",
           ms: event.ms,
         },
       ]);
@@ -171,7 +300,6 @@ export default function Assistant() {
         ...previous,
         {
           id: `${event.tool}-${previous.length}`,
-          kind: "tool",
           label: TOOL_LABEL[event.tool] ?? event.tool,
           status:
             event.status === "denied"
@@ -187,7 +315,6 @@ export default function Assistant() {
     }
 
     if (event.type === "final") {
-      setSessionId(event.session_id);
       setTurns((previous) => [
         ...previous,
         {
@@ -196,6 +323,11 @@ export default function Assistant() {
           routes: event.routes,
           guard: event.guard,
           structured: event.structured,
+          citations: event.citations,
+          consult: event.consult,
+          cache: event.cache,
+          latencyMs: event.latency_ms,
+          provider: event.provider,
         },
       ]);
       setTrace([]);
@@ -208,200 +340,457 @@ export default function Assistant() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
-      <PageHeader
-        title="SuwaPath Assistant"
-        subtitle="Ask about your symptoms, appointments, reports or general health."
-      />
-
-      <Card className="!p-0 overflow-hidden">
-        <div className="h-[52vh] min-h-[340px] overflow-y-auto p-4 sm:p-5 space-y-4 bg-canvas">
-          {turns.length === 0 && (
-            <div className="text-center py-8">
-              <span className="sp-icon-tile bg-brand-50 text-brand-700 !h-12 !w-12 mx-auto">
-                <Icon name="ai" size={26} />
-              </span>
-              <p className="mt-3 font-medium text-ink-800">
-                Hello {user?.full_name.split(" ")[0]} — what can I help with?
-              </p>
-              <div className="mt-5 flex flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => void send(suggestion)}
-                    className="rounded-full border border-ink-200 bg-surface px-3.5 py-2 text-sm text-ink-700 hover:border-brand-400 hover:bg-brand-50 transition"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {turns.map((turn, index) => (
-            <div
-              key={index}
-              className={`flex ${turn.role === "user" ? "justify-end" : "justify-start"}`}
+    <div className="mx-auto max-w-6xl">
+      <div className="flex gap-4">
+        {/* ---------------- History sidebar ---------------- */}
+        <aside
+          className={`${
+            showHistory ? "block" : "hidden"
+          } lg:block w-full lg:w-64 shrink-0`}
+        >
+          <Card className="!p-3 lg:sticky lg:top-4">
+            <button
+              onClick={() => reset(false)}
+              className="sp-btn sp-btn-primary w-full justify-center"
             >
-              <div className="max-w-[85%] space-y-2">
+              <Icon name="add" size={16} />
+              New chat
+            </button>
+            <button
+              onClick={() => setPinPrompt(true)}
+              className="sp-btn sp-btn-ghost w-full justify-center mt-2"
+            >
+              <Icon name="lock" size={16} />
+              Private chat
+            </button>
+
+            <p className="mt-4 mb-1.5 px-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
+              Recent
+            </p>
+            <div className="space-y-0.5 max-h-[46vh] overflow-y-auto">
+              {sessions.length === 0 && (
+                <p className="px-1 py-2 text-sm text-ink-400">
+                  Your conversations will appear here.
+                </p>
+              )}
+              {sessions.map((session) => (
                 <div
-                  className={`rounded-2xl px-4 py-2.5 whitespace-pre-wrap ${
-                    turn.role === "user"
-                      ? "bg-brand-600 text-white rounded-br-md"
-                      : "bg-surface border border-line text-ink-800 rounded-bl-md"
+                  key={session.id}
+                  className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition ${
+                    session.id === sessionId
+                      ? "bg-brand-50 text-brand-800"
+                      : "hover:bg-canvas text-ink-700"
                   }`}
                 >
-                  {turn.content}
-                </div>
-
-                {turn.role === "assistant" && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {turn.routes?.map((route) => (
-                      <Chip key={route} tone="info">
-                        {NODE_LABEL[`${route}_agent`]?.label ?? route}
-                      </Chip>
-                    ))}
-                    {turn.guard?.input === "crisis" && (
-                      <Chip tone="danger" icon="emergency">
-                        Crisis support
-                      </Chip>
-                    )}
-                    {turn.guard?.output_verdict === "soften" && (
-                      <Chip tone="warn" icon="shield">
-                        Safety caveat added
-                      </Chip>
-                    )}
-                  </div>
-                )}
-
-                {/* Structured results render as real UI, not as prose. */}
-                {turn.structured?.admin?.doctors?.length > 0 && (
-                  <div className="space-y-2">
-                    {turn.structured.admin.doctors.slice(0, 3).map((doctor: any) => (
-                      <div
-                        key={doctor.doctor_id}
-                        className="rounded-xl border border-line bg-surface p-3"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-ink-900">{doctor.name}</p>
-                            <p className="text-xs text-ink-500">
-                              {doctor.specialty} · {doctor.hospital_name}
-                            </p>
-                          </div>
-                          {doctor.distance_km != null && (
-                            <span className="text-xs text-ink-500 shrink-0">
-                              {doctor.distance_km} km
-                            </span>
-                          )}
-                        </div>
-                        {doctor.next_available && (
-                          <p className="text-xs text-brand-700 font-medium mt-1">
-                            Next: {doctor.next_available.date_label},{" "}
-                            {doctor.next_available.label}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {/* Live chain of thought */}
-          {trace.length > 0 && (
-            <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-line bg-surface p-3.5 space-y-2">
-                <p className="text-xs text-ink-500">Working…</p>
-                {trace.map((item) => (
-                  <div key={item.id} className="flex items-center gap-2 text-sm">
-                    <span
-                      className={`grid place-items-center h-5 w-5 rounded-md border shrink-0 ${
-                        item.status === "denied"
-                          ? "bg-warn-surface border-warn-border text-warn-text"
-                          : item.status === "error"
-                            ? "bg-danger-surface border-danger-border text-danger-text"
-                            : "bg-ok-surface border-ok-border text-ok-text"
-                      }`}
-                    >
-                      <Icon
-                        name={
-                          item.status === "denied"
-                            ? "lock"
-                            : item.status === "error"
-                              ? "error"
-                              : "check"
-                        }
-                        size={12}
-                      />
+                  <button
+                    onClick={() => void openSession(session.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <span className="block truncate">{session.title}</span>
+                    <span className="block text-xs text-ink-400">
+                      {relativeDay(session.last_message_at)}
                     </span>
-                    <span className="text-ink-700">{item.label}</span>
-                    {item.detail && (
-                      <span className="text-xs text-ink-400">· {item.detail}</span>
-                    )}
-                    {item.ms != null && item.ms > 0 && (
-                      <span className="text-xs text-ink-400">{item.ms}ms</span>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  </button>
+                  <button
+                    onClick={() => void deleteSession(session.id)}
+                    aria-label="Delete conversation"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-ink-400 hover:text-danger-text transition"
+                  >
+                    <Icon name="delete" size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </aside>
+
+        {/* ---------------- Conversation ---------------- */}
+        <div className="min-w-0 flex-1 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold text-ink-900 leading-snug">
+                SuwaPath Assistant
+              </h1>
+              <p className="text-sm text-ink-500">
+                Symptoms, reports, appointments — all in one conversation.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowHistory((v) => !v)}
+              className="sp-btn sp-btn-ghost lg:hidden shrink-0"
+            >
+              <Icon name="history" size={16} />
+            </button>
+          </div>
+
+          {isPrivate && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-programme-border bg-programme-surface px-3.5 py-2.5">
+              <Icon
+                name="lock"
+                size={17}
+                className="mt-0.5 shrink-0 text-programme-text"
+              />
+              <p className="text-sm text-programme-text">
+                <strong className="font-semibold">Private chat.</strong> Nothing
+                here is saved to your history, and only your PIN can reopen it.
+                It disappears after 12 hours.
+              </p>
             </div>
           )}
 
-          {busy && trace.length === 0 && (
-            <div className="flex justify-start">
-              <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3">
-                <span className="flex gap-1">
-                  {[0, 1, 2].map((dot) => (
-                    <span
-                      key={dot}
-                      className="h-2 w-2 rounded-full bg-ink-300 animate-bounce"
-                      style={{ animationDelay: `${dot * 120}ms` }}
-                    />
-                  ))}
-                </span>
-              </div>
+          <Card className="!p-0 overflow-hidden">
+            <div className="h-[58vh] min-h-[380px] overflow-y-auto bg-canvas p-4 sm:p-5 space-y-4">
+              {turns.length === 0 && (
+                <Welcome name={user?.full_name} onPick={send} />
+              )}
+
+              {turns.map((turn, index) => (
+                <TurnBubble key={index} turn={turn} />
+              ))}
+
+              {trace.length > 0 && <Thinking items={trace} />}
+              {busy && trace.length === 0 && <Dots />}
+              <div ref={endRef} />
             </div>
-          )}
-          <div ref={endRef} />
+
+            <form
+              className="flex gap-2 border-t border-line bg-surface p-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void send(input);
+              }}
+            >
+              <input
+                className="sp-input"
+                placeholder={
+                  isPrivate
+                    ? "Private chat — ask anything…"
+                    : "Describe a symptom, or ask about your reports…"
+                }
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                disabled={busy}
+              />
+              <button
+                className="sp-btn sp-btn-primary"
+                disabled={busy || !input.trim()}
+              >
+                <Icon name="send" size={18} />
+                <span className="hidden sm:inline">Send</span>
+              </button>
+            </form>
+          </Card>
+
+          <ErrorNote message={error} />
+
+          <p className="px-1 text-xs text-ink-400">
+            SuwaPath helps you navigate care. It does not diagnose or prescribe,
+            and urgency is always decided by the clinical rule engine — never by
+            a language model.
+          </p>
         </div>
+      </div>
 
-        <form
-          className="border-t border-line p-3 flex gap-2 bg-surface"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send(input);
+      {pinPrompt && (
+        <PinDialog
+          pin={pin}
+          setPin={setPin}
+          onCancel={() => {
+            setPinPrompt(false);
+            setPin("");
           }}
-        >
-          <input
-            className="sp-input"
-            placeholder="Ask about symptoms, appointments or your reports…"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            disabled={busy}
-          />
-          <button className="sp-btn sp-btn-primary" disabled={busy || !input.trim()}>
-            <Icon name="send" size={18} />
-            <span className="hidden sm:inline">Send</span>
-          </button>
-        </form>
-      </Card>
-
-      <ErrorNote message={error} />
-
-      {turns.length === 0 && (
-        <Empty
-          title="Your conversation is private"
-          hint="Only the minimum information needed for each question is used, and never anything a person has not shared with you."
+          onConfirm={startPrivate}
         />
       )}
+    </div>
+  );
+}
 
-      <AiNotice>
-        The assistant helps you navigate care. It does not diagnose or
-        prescribe, and urgency is always decided by SuwaPath's clinical rule
-        engine — never by the language model.
-      </AiNotice>
+/* ------------------------------------------------------------------ */
+
+function Welcome({
+  name,
+  onPick,
+}: {
+  name?: string;
+  onPick: (text: string) => void;
+}) {
+  return (
+    <div className="py-8 text-center">
+      <span className="sp-icon-tile mx-auto bg-brand-50 text-brand-700 !h-12 !w-12">
+        <Icon name="ai" size={26} />
+      </span>
+      <p className="mt-3 font-medium text-ink-800">
+        Hello {name?.split(" ")[0]} — what can I help with?
+      </p>
+      <p className="mx-auto mt-1 max-w-md text-sm text-ink-500">
+        Tell me what's bothering you in your own words. I'll ask a few questions
+        the way a doctor would before pointing you anywhere.
+      </p>
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
+        {SUGGESTIONS.map((suggestion) => (
+          <button
+            key={suggestion}
+            onClick={() => onPick(suggestion)}
+            className="rounded-full border border-ink-200 bg-surface px-3.5 py-2 text-sm text-ink-700 transition hover:border-brand-400 hover:bg-brand-50"
+          >
+            {suggestion}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TurnBubble({ turn }: { turn: Turn }) {
+  if (turn.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-brand-600 px-4 py-2.5 text-white">
+          {turn.content}
+        </div>
+      </div>
+    );
+  }
+
+  const doctors = turn.structured?.admin?.doctors ?? [];
+  const tests = turn.structured?.consult?.consult?.tests ?? [];
+  const urgency = turn.consult?.urgency;
+
+  return (
+    <div className="flex justify-start">
+      <div className="min-w-0 max-w-[92%] space-y-2">
+        <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3 text-ink-800">
+          <Markdown content={turn.content} />
+        </div>
+
+        {/* Provenance: how this answer was produced. */}
+        <div className="flex flex-wrap items-center gap-1.5 px-1">
+          {turn.cache?.hit && (
+            <Chip tone="ok" icon="bolt">
+              Known answer
+            </Chip>
+          )}
+          {turn.routes?.map((route) => (
+            <Chip key={route} tone="info">
+              {ROUTE_LABEL[route] ?? route}
+            </Chip>
+          ))}
+          {urgency && urgency !== "routine" && <UrgencyBadge urgency={urgency} />}
+          {turn.guard?.output_verdict === "soften" && (
+            <Chip tone="warn" icon="shield">
+              Caveat added
+            </Chip>
+          )}
+          {turn.guard?.input === "crisis" && (
+            <Chip tone="danger" icon="emergency">
+              Crisis support
+            </Chip>
+          )}
+          {turn.latencyMs != null && (
+            <span className="text-xs text-ink-400">
+              {(turn.latencyMs / 1000).toFixed(1)}s
+              {turn.provider && turn.provider !== "passthrough"
+                ? ` · ${turn.provider}`
+                : ""}
+            </span>
+          )}
+        </div>
+
+        {/* Structured results render as UI, not as prose. */}
+        {tests.length > 0 && (
+          <div className="rounded-xl border border-line bg-surface p-3">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-400">
+              Tests worth asking about
+            </p>
+            <ul className="space-y-1 text-sm text-ink-700">
+              {tests.slice(0, 4).map((test: any, i: number) => (
+                <li key={i} className="flex gap-2">
+                  <Icon
+                    name="lab"
+                    size={15}
+                    className="mt-0.5 shrink-0 text-brand-600"
+                  />
+                  <span>{test.name}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {doctors.length > 0 && (
+          <div className="space-y-2">
+            {doctors.slice(0, 3).map((doctor: any) => (
+              <div
+                key={doctor.doctor_id}
+                className="rounded-xl border border-line bg-surface p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-ink-900">{doctor.name}</p>
+                    <p className="text-xs text-ink-500">
+                      {doctor.specialty} · {doctor.hospital_name}
+                    </p>
+                  </div>
+                  {doctor.distance_km != null && (
+                    <span className="shrink-0 text-xs text-ink-500">
+                      {doctor.distance_km} km
+                    </span>
+                  )}
+                </div>
+                {doctor.next_available && (
+                  <p className="mt-1 text-xs font-medium text-brand-700">
+                    Next: {doctor.next_available.date_label},{" "}
+                    {doctor.next_available.label}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {turn.citations && turn.citations.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-1">
+            {turn.citations.slice(0, 4).map((citation: any, i: number) =>
+              citation.url ? (
+                <a
+                  key={i}
+                  href={citation.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-ink-600 transition hover:border-brand-400"
+                >
+                  {citation.source ?? citation.title}
+                </a>
+              ) : (
+                <span
+                  key={i}
+                  className="rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-ink-500"
+                >
+                  {citation.title}
+                </span>
+              ),
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Thinking({ items }: { items: TraceItem[] }) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[85%] space-y-2 rounded-2xl rounded-bl-md border border-line bg-surface p-3.5">
+        <p className="text-xs text-ink-500">Working…</p>
+        {items.map((item) => (
+          <div key={item.id} className="flex items-center gap-2 text-sm">
+            <span
+              className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border ${
+                item.status === "denied"
+                  ? "border-warn-border bg-warn-surface text-warn-text"
+                  : item.status === "error"
+                    ? "border-danger-border bg-danger-surface text-danger-text"
+                    : "border-ok-border bg-ok-surface text-ok-text"
+              }`}
+            >
+              <Icon
+                name={
+                  item.status === "denied"
+                    ? "lock"
+                    : item.status === "error"
+                      ? "error"
+                      : "check"
+                }
+                size={12}
+              />
+            </span>
+            <span className="text-ink-700">{item.label}</span>
+            {item.detail && (
+              <span className="text-xs text-ink-400">· {item.detail}</span>
+            )}
+            {item.ms != null && item.ms > 0 && (
+              <span className="text-xs text-ink-400">{item.ms}ms</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Dots() {
+  return (
+    <div className="flex justify-start">
+      <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3">
+        <span className="flex gap-1">
+          {[0, 1, 2].map((dot) => (
+            <span
+              key={dot}
+              className="h-2 w-2 animate-bounce rounded-full bg-ink-300"
+              style={{ animationDelay: `${dot * 120}ms` }}
+            />
+          ))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PinDialog({
+  pin,
+  setPin,
+  onCancel,
+  onConfirm,
+}: {
+  pin: string;
+  setPin: (v: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/50 p-4">
+      <Card className="w-full max-w-sm">
+        <div className="flex items-start gap-3">
+          <span className="sp-icon-tile bg-programme-surface text-programme-text">
+            <Icon name="lock" size={20} />
+          </span>
+          <div className="min-w-0">
+            <h2 className="font-semibold text-ink-900">Start a private chat</h2>
+            <p className="mt-1 text-sm text-ink-600">
+              Nothing you say is written to your history. Choose a 6-digit PIN —
+              it is the only way to reopen this conversation, and it cannot be
+              recovered.
+            </p>
+          </div>
+        </div>
+
+        <input
+          className="sp-input mt-4 text-center text-lg tracking-[0.4em]"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={6}
+          placeholder="••••••"
+          value={pin}
+          onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+        />
+
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={onCancel}
+            className="sp-btn sp-btn-ghost flex-1 justify-center"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={pin.length !== 6}
+            className="sp-btn sp-btn-primary flex-1 justify-center"
+          >
+            Start
+          </button>
+        </div>
+      </Card>
     </div>
   );
 }

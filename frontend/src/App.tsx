@@ -8,7 +8,6 @@ import { Profile, Settings } from "./pages/Account";
 import Login from "./pages/Login";
 
 import PatientDashboard from "./pages/patient/Dashboard";
-import SymptomCheck from "./pages/patient/SymptomCheck";
 import Assistant from "./pages/patient/Assistant";
 import FindCare from "./pages/patient/FindCare";
 import Programmes from "./pages/patient/Programmes";
@@ -74,7 +73,14 @@ export default function App() {
       {/* Patient */}
       <Route element={<Protected roles={["patient"]} />}>
         <Route path="/patient" element={<PatientDashboard />} />
-        <Route path="/patient/symptom-check" element={<SymptomCheck />} />
+        {/* The symptom checker is now part of the assistant: one
+            conversation that can take a history, read a report and book
+            an appointment, rather than three that cannot see each other.
+            The old path is kept so existing links still land somewhere. */}
+        <Route
+          path="/patient/symptom-check"
+          element={<Navigate to="/patient/assistant" replace />}
+        />
         <Route path="/patient/assistant" element={<Assistant />} />
         <Route path="/patient/find-care" element={<FindCare />} />
         <Route path="/patient/appointments" element={<Appointments />} />

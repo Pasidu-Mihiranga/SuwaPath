@@ -31,7 +31,11 @@ from app.models.enums import (
 from app.models.identity import User
 from app.models.platform import Notification
 from app.models.providers import Doctor, Hospital
-from app.services.availability import is_slot_free, slot_matches_schedule
+from app.services.availability import (
+    is_slot_free,
+    slot_duration_for,
+    slot_matches_schedule,
+)
 from app.services.matching import haversine_km
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
@@ -184,7 +188,9 @@ def book(
     if start <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Choose a future appointment time.")
 
-    duration = payload.duration_minutes or 20
+    # Default to the doctor's own slot length rather than a fixed guess, so a
+    # booking occupies exactly the slot that was offered.
+    duration = payload.duration_minutes or slot_duration_for(doctor, start) or 20
     end = start + timedelta(minutes=duration)
 
     if not slot_matches_schedule(doctor, start, end):

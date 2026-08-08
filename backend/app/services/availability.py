@@ -213,6 +213,29 @@ def slot_matches_schedule(doctor: Doctor, start: datetime, end: datetime) -> boo
     return False
 
 
+def slot_duration_for(doctor: Doctor, start: datetime) -> int | None:
+    """The doctor's own slot length for the block containing ``start``.
+
+    Offered slots are generated from ``schedule.slot_duration_minutes``, so a
+    booking must use the same length. Assuming a fixed duration instead made
+    a 15-minute slot become a 20-minute appointment that ran into the next
+    slot — and if that one was taken, the patient was told the slot they had
+    just been offered was "already taken".
+
+    Returns None when ``start`` falls outside every published block; the
+    caller's schedule check reports that more precisely.
+    """
+    start = _as_utc(start)
+    for schedule in doctor.schedules:
+        if not schedule.is_active or schedule.day_of_week != start.weekday():
+            continue
+        block_start = _combine(start.date(), schedule.start_time)
+        block_end = _combine(start.date(), schedule.end_time)
+        if block_start <= start < block_end:
+            return schedule.slot_duration_minutes
+    return None
+
+
 def _booked_starts(
     db: Session, doctor_id: str, start_date: date, end_date: date
 ) -> set[datetime]:

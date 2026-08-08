@@ -33,7 +33,6 @@ const NAV: Record<Role, NavItem[]> = {
   patient: [
     { to: "/patient", label: "Dashboard", short: "Home", icon: "home", tab: true, end: true },
     { to: "/patient/assistant", label: "Assistant", short: "Ask", icon: "ai", tab: true },
-    { to: "/patient/symptom-check", label: "Symptom Check", short: "Symptoms", icon: "chat" },
     { to: "/patient/appointments", label: "Appointments", short: "Visits", icon: "calendar", tab: true },
     { to: "/patient/find-care", label: "Doctors & Hospitals", icon: "hospital", section: "Find care" },
     { to: "/patient/reports", label: "Medical Reports", icon: "description", section: "Find care" },
