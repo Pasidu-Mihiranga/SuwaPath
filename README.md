@@ -38,9 +38,10 @@ Built for **AI Buildathon 2026** · Team **Gmora** · SDG 3 — Good Health and 
 - [Plugging in your own CV model](#plugging-in-your-own-cv-model)
 - [Seeded dataset](#seeded-dataset)
 - [Privacy, consent and safety](#privacy-consent-and-safety)
-  - [Is PII masking enough?](#is-pii-masking-enough)
+  - [How the PHI boundary works](#how-the-phi-boundary-works)
+  - [Data at rest](#data-at-rest)
   - [Private mode](#private-mode)
-- [What is real, and what is not](#what-is-real-and-what-is-not)
+- [Implementation status](#implementation-status)
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
 - [Disclaimer](#disclaimer)
@@ -84,7 +85,8 @@ demand forecast. It is one workflow, not five dashboards.
 | **Care programmes** | Maternal/postpartum with danger-sign check-ins, elderly care with medication adherence and pattern-based guardian alerts, and a confidential sexual-health pathway. |
 | **Consent-controlled guardians** | Deny-by-default. A guardian sees only what the patient explicitly granted, and withheld sections are shown as withheld rather than silently hidden. |
 | **Hospital intelligence** | No-show risk and 7-day specialty demand forecasting, both fitted on the hospital's own historical appointments. |
-| **Private mode** | A conversation whose message bodies are never written to the database at all. Resumable only with a 6-digit PIN, invisible in history, gone in 12 hours. |
+| **Private mode** | Encrypted under a key derived from the user's PIN and never stored, so the server cannot read it unattended. Invisible in history, gone in 12 hours. |
+| **Encrypted at rest** | AES-256-GCM over conversation content in the application layer, not just on the disk, with a 90-day retention window. |
 | **Answers before generating** | Greetings and product FAQs return reviewed answers from cache in ~0 ms. Nothing clinical is ever cached — near-identical questions have completely different correct answers. |
 | **Works without any API key** | Three model providers are tried in order and none is required. With none set, every feature still runs on deterministic engines and composers. Nothing hard-fails in a demo. |
 
@@ -604,6 +606,13 @@ All configuration is environment-driven. Copy `.env.example` to `.env`.
 | `TAVILY_API_KEY` | *(empty)* | Optional web search. Current public information only — never clinical decisions. |
 | `QDRANT_URL` | *(empty)* | Empty ⇒ embedded on-disk Qdrant in `backend/storage/qdrant` |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Retrieval embeddings |
+| `SUWAPATH_ENCRYPTION_KEY` | *(empty)* | Base64 32-byte AES-256-GCM key for stored conversations. Empty stores plaintext. **Set before any deployment — losing it makes existing conversations unreadable.** |
+
+Generate an encryption key with:
+
+```bash
+python3 -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+```
 
 **Every model key is optional.** With none of them set the platform still runs
 end to end on its deterministic composers — see
@@ -905,11 +914,10 @@ hard-coded flag.
 - **Every AI output carries** a recommendation, a reason, a confidence and a
   suggested next action.
 
-### Is PII masking enough?
+### How the PHI boundary works
 
-No — and treating it as the answer is the common mistake. Masking is the
-*last* layer in `app/privacy/boundary.py`, not the first. Three cheaper layers
-sit in front of it:
+Masking is the last layer in `app/privacy/boundary.py`, not the first. Three
+layers sit in front of it:
 
 1. **Don't send it.** Four capabilities are local-only and never call a hosted
    model at all: red-flag assessment, OCR extraction, image analysis, and
@@ -924,24 +932,61 @@ sit in front of it:
    guard scans the final payload for identifiers. A hit blocks the call and
    audits it rather than sending it.
 
+### Data at rest
+
+Conversation content is encrypted in the database with **AES-256-GCM**, applied
+in the application rather than left to disk encryption. Disk encryption
+protects a stolen machine; it does nothing about a leaked backup, a copied
+snapshot, a read replica, or a query that returns rows. Encrypting the column
+means ciphertext is what leaks.
+
+Two key types cover two different threats:
+
+| | Key | Readable by the server | Threat addressed |
+|---|---|---|---|
+| Ordinary conversations | `SUWAPATH_ENCRYPTION_KEY` | Yes — history has to work | Database read by anything that is not the application |
+| Private conversations | PBKDF2 from the user's PIN, never stored | Only while the PIN holder is using it | A dump *plus* the full application configuration |
+
+Values are stored as `v1.<nonce>.<ciphertext>`, so keys can be rotated later
+without guessing how a given row was written. Rows written before encryption
+was enabled stay readable, so switching it on needs no migration. GCM
+authenticates as well as encrypts: a tampered row fails to decrypt instead of
+returning altered text.
+
+Ordinary conversations are deleted after **90 days**.
+
+End-to-end encryption is not possible for an AI assistant — the server must
+read the message to send it to a model. Any product claiming otherwise is
+doing one or the other, not both.
+
 ### Private mode
 
 For a conversation about an STI, an unplanned pregnancy or mental health, the
-realistic threat is not a database attacker — it is a shared phone and a
-family member. So a private session stores **no message bodies at all**. Not
-encrypted, not hashed: never written. The row holds a session id, an owner, a
-PBKDF2 PIN verifier and an expiry; the transcript lives in process memory and
-is gone in 12 hours.
+realistic threat is a shared phone rather than a database attacker. A private
+session is therefore:
 
-It does not appear in the history list, its title is never derived from its
-content, and five wrong PINs destroy it rather than locking it. Losing the PIN
-means losing the conversation — that is the feature, not a gap.
+- **absent from history** — no row in the visible list, and its title is never
+  derived from its content
+- **encrypted under a key derived from the PIN**, held in memory only while the
+  session is open, so the transcript survives a restart but the server cannot
+  read it unattended
+- **gone after 12 hours**
 
-### The honest caveat
+One PIN per person, not per conversation. A per-session PIN could not survive
+contact with resumption: given only a PIN, the server cannot tell which
+conversation was meant, so a wrong guess had to count against all of them.
 
-Free model tiers generally reserve the right to train on submitted content.
-That makes them unsuitable for real patient data regardless of how good the
-controls above are, so **every record in this repository is synthetic**.
+Five wrong attempts lock the PIN for 15 minutes. It locks rather than deletes,
+because one PIN now guards every private chat — self-destruction would let
+anyone holding the phone erase all of them in five guesses.
+
+Losing the PIN means losing the conversation.
+
+### Synthetic data only
+
+Free model tiers generally reserve the right to train on submitted content,
+which makes them unsuitable for real patient data regardless of the controls
+above. **Every record in this repository is synthetic.**
 `GET /api/v1/agent/status` reports this rather than hiding it:
 
 ```json
@@ -953,9 +998,9 @@ The boundary code does not change; only the egress destination does.
 
 ---
 
-## What is real, and what is not
+## Implementation status
 
-An honest inventory, because "works end to end" should mean something.
+What is fully implemented, and what is a placeholder.
 
 | Component | Status |
 |---|---|
@@ -970,7 +1015,8 @@ An honest inventory, because "works end to end" should mean something.
 | Assistant conversation | **Real** — LangGraph fan-out, doctor-style history taking, cached FAQ answers |
 | Guardrails and output judge | **Real** — deterministic, both sides of the graph; urgency never model-set |
 | PHI boundary | **Real** — per-route allowlist, pseudonymisation, egress guard, audit |
-| Private chat | **Real** — message bodies never written to the database; PBKDF2 PIN, self-destruct on brute force |
+| Private chat | **Real** — encrypted under a PBKDF2 key derived from the user's PIN; absent from history; 12-hour expiry |
+| Encryption at rest | **Real** — AES-256-GCM over conversation content, versioned ciphertext, 90-day retention |
 | Web search | **Real when `TAVILY_API_KEY` is set** — domain-ranked, dosing text stripped |
 | Model wording | **Real when any provider key is set** — deterministic composers otherwise |
 | **Pneumonia CV model** | **Baseline placeholder** — see below |
@@ -995,11 +1041,8 @@ clinical images when evaluating an actual model.
 <details>
 <summary><b>zsh: no such file or directory: .venv/bin/python</b></summary>
 
-You ran the command from the wrong directory. The virtual environment lives at
-`backend/.venv`, not at the repo root — this happens after `cd backend`,
-creating the venv, then `cd ..` for an unrelated step (installing Homebrew
-packages, editing `.env`) without `cd backend` again before continuing. Run
-`cd backend` and retry.
+The virtual environment lives at `backend/.venv`, not at the repo root. Run
+the command from `backend/`.
 </details>
 
 <details>
@@ -1028,6 +1071,17 @@ LC_ALL=C pg_ctl -D /opt/homebrew/var/postgresql@16 start
 This Homebrew instance listens on **5436**, not the default 5432. Check
 `grep port /opt/homebrew/var/postgresql@16/postgresql.conf` and set
 `DATABASE_URL` accordingly.
+</details>
+
+<details>
+<summary><b>Conversations show <code>[encrypted — could not be read]</code></b></summary>
+
+`SUWAPATH_ENCRYPTION_KEY` does not match the key those rows were written with.
+Restore the original key. There is no recovery path without it — that is the
+point of encrypting them.
+
+A private chat that reopens empty means its PIN changed after the transcript
+was written; the transcript key is derived from the PIN.
 </details>
 
 <details>
