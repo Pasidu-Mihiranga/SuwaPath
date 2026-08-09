@@ -37,6 +37,7 @@ Built for **AI Buildathon 2026** · Team **Gmora** · SDG 3 — Good Health and 
 - [Testing and verification](#testing-and-verification)
 - [Plugging in your own CV model](#plugging-in-your-own-cv-model)
 - [Seeded dataset](#seeded-dataset)
+- [The autonomy layer](#the-autonomy-layer)
 - [Privacy, consent and safety](#privacy-consent-and-safety)
   - [How the PHI boundary works](#how-the-phi-boundary-works)
   - [Data at rest](#data-at-rest)
@@ -86,6 +87,8 @@ demand forecast. It is one workflow, not five dashboards.
 | **Consent-controlled guardians** | Deny-by-default. A guardian sees only what the patient explicitly granted, and withheld sections are shown as withheld rather than silently hidden. |
 | **Hospital intelligence** | No-show risk and 7-day specialty demand forecasting, both fitted on the hospital's own historical appointments. |
 | **Private mode** | Encrypted under a key derived from the user's PIN and never stored, so the server cannot read it unattended. Invisible in history, gone in 12 hours. |
+| **Acts without being asked** | Four detectors run on a schedule and notice what nobody reports: care that was recommended but never booked, doses that stopped being taken, appointments that elapsed, check-ins that stopped. |
+| **Prepares, then asks** | A stalled referral becomes a specific bookable action — named doctor, a facility that can run the required test, real slot, real fee — waiting on one tap. Nothing clinical is ever automated. |
 | **Encrypted at rest** | AES-256-GCM over conversation content in the application layer, not just on the disk, with a 90-day retention window. |
 | **Answers before generating** | Greetings and product FAQs return reviewed answers from cache in ~0 ms. Nothing clinical is ever cached — near-identical questions have completely different correct answers. |
 | **Works without any API key** | Three model providers are tried in order and none is required. With none set, every feature still runs on deterministic engines and composers. Nothing hard-fails in a demo. |
@@ -606,6 +609,10 @@ All configuration is environment-driven. Copy `.env.example` to `.env`.
 | `TAVILY_API_KEY` | *(empty)* | Optional web search. Current public information only — never clinical decisions. |
 | `QDRANT_URL` | *(empty)* | Empty ⇒ embedded on-disk Qdrant in `backend/storage/qdrant` |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Retrieval embeddings |
+| `SCHEDULER_ENABLED` | `true` | Runs the autonomy layer. Off disables all detectors. |
+| `AGENTIC_ENABLED` | `true` | Master switch for autonomous behaviour |
+| `LOCAL_TIMEZONE` | `Asia/Colombo` | Medication times, quiet hours and daily job buckets are local-calendar concepts |
+| `SMS_PROVIDER` | *(empty)* | Empty ⇒ no-op provider: delivery is recorded, nothing is sent |
 | `SUWAPATH_ENCRYPTION_KEY` | *(empty)* | Base64 32-byte AES-256-GCM key for stored conversations. Empty stores plaintext. **Set before any deployment — losing it makes existing conversations unreadable.** |
 
 Generate an encryption key with:
@@ -826,7 +833,15 @@ and asserts the RBAC boundaries:
 - a guardian cannot read a non-dependent
 - unauthenticated requests are rejected
 
-**Current status: 73 checks passing, 0 failing.**
+```bash
+cd backend && PYTHONPATH=. .venv/bin/python tests/test_agentic.py
+```
+
+Covers the autonomy layer against a virtual clock: detection without a
+request, idempotent re-runs, the per-patient cap, proposal-then-approval, and
+the safety negatives.
+
+**Current status: 73 scenario checks and 23 agentic checks passing, 0 failing.**
 
 ---
 
@@ -897,6 +912,99 @@ hard-coded flag.
 
 ---
 
+## The autonomy layer
+
+Most of this product answers questions. This part does not wait to be asked.
+
+In low-resource healthcare the common failure is not bad advice, it is
+follow-through: the referral nobody booked, the tablets that quietly stopped,
+the check-in that never came. None of those generate a message — that is
+exactly why they are missed.
+
+### What runs on its own
+
+| Job | Every | What it notices |
+|---|---|---|
+| `detect_unconverted_referrals` | 6 h | Care that was recommended and never arranged |
+| `materialise_and_check_medication` | 1 h | Doses whose time passed with nothing recorded, then runs of missed doses |
+| `sweep_elapsed_appointments` | 15 min | Appointments whose slot came and went |
+| `detect_checkin_lapses` | 12 h | Elderly check-ins that stopped arriving |
+
+Detectors are **pure**: they read, and they queue work. They never send, book
+or alert. Acting is a handler's job, and handlers run once. That split is what
+makes running them every few minutes safe.
+
+### From noticing to acting
+
+A stalled referral does not produce "please see a gastroenterologist" — the
+patient already knows that and did not act on it. It runs the existing
+capability matcher and produces a bookable action: a named doctor, at a
+facility that can perform the test the recommendation requires, at a real
+slot, for a real fee, with the reason attached.
+
+Escalation is a ladder, and each rung fires at most once:
+
+| urgency | nudge | guardian alert | final | close |
+|---|---|---|---|---|
+| urgent | 2 days | 5 days | 7 days | — |
+| routine | 7 days | 14 days (second nudge) | — | 30 days |
+
+At most **three open follow-ups per person**. A patient with a long history has
+dozens of active recommendations, and chasing all of them produces an inbox
+nobody reads — an unread reminder is worth less than no reminder, because it
+also teaches people to ignore the next one.
+
+### What the system may do by itself
+
+| Tier | Actions | Behaviour |
+|---|---|---|
+| **T0** | reminders, care-plan steps, guardian alerts | Executes immediately, always audited |
+| **T1** | book, reschedule, cancel, enrol, share a record | Prepared in full; one human tap executes |
+| **T2** | prescribing, diagnoses, clinical notes, urgency, consent changes | **Not registered at all** — there is no path from a model to these |
+
+Two rules hold across every tier. **A guardian alert requires evidence** naming
+the deterministic rule or detector that fired, so a model can word an alert but
+cannot invent grounds for one. **Nothing writes in a private chat**, because
+private mode promises nothing is recorded.
+
+Approval re-derives authority at execution time and never trusts the stored
+arguments — consent may have changed, and the slot may be gone. Booking runs
+through one shared service, so an approved suggestion cannot take a more
+permissive path than a person tapping Book.
+
+### Reaching someone who is not in the app
+
+| priority | channels | quiet hours |
+|---|---|---|
+| critical | in-app + SMS now, retry at +10 min | ignored |
+| high | in-app now, SMS at +60 min if unread | deferred to 07:00 |
+| normal / low | in-app only | respected |
+
+Quiet hours are 21:00–07:00 Asia/Colombo. **SMS never carries clinical
+content** — not the condition, not the specialty, not the medication. It says
+there is something to look at. SMS is unencrypted, retained by the aggregator,
+and lands on a lock screen that may be read by anyone nearby, which is the same
+threat model private mode exists for. The one exception is a life-threatening
+escalation, which may carry the deterministic red-flag instruction because it
+names no condition.
+
+No SMS gateway is configured by default; the no-op provider records the attempt
+so the whole path stays testable.
+
+### Verifying it
+
+```bash
+cd backend && python tests/test_agentic.py
+```
+
+Every detector reads the time from `app/services/clock.py`, so the suite can
+advance a virtual clock and test a 30-day escalation ladder in milliseconds.
+It asserts the negative as hard as the positive: that nothing was booked before
+approval, that a stranger cannot approve or even see a proposal, that the
+per-patient cap holds, and that no clinical action is registered.
+
+---
+
 ## Privacy, consent and safety
 
 - **Guardian access is deny-by-default.** A relationship grants nothing; each
@@ -944,7 +1052,11 @@ Two key types cover two different threats:
 
 | | Key | Readable by the server | Threat addressed |
 |---|---|---|---|
-| Ordinary conversations | `SUWAPATH_ENCRYPTION_KEY` | Yes — history has to work | Database read by anything that is not the application |
+| Ordinary conversations | `SCHEDULER_ENABLED` | `true` | Runs the autonomy layer. Off disables all detectors. |
+| `AGENTIC_ENABLED` | `true` | Master switch for autonomous behaviour |
+| `LOCAL_TIMEZONE` | `Asia/Colombo` | Medication times, quiet hours and daily job buckets are local-calendar concepts |
+| `SMS_PROVIDER` | *(empty)* | Empty ⇒ no-op provider: delivery is recorded, nothing is sent |
+| `SUWAPATH_ENCRYPTION_KEY` | Yes — history has to work | Database read by anything that is not the application |
 | Private conversations | PBKDF2 from the user's PIN, never stored | Only while the PIN holder is using it | A dump *plus* the full application configuration |
 
 Values are stored as `v1.<nonce>.<ciphertext>`, so keys can be rotated later
@@ -1016,6 +1128,9 @@ What is fully implemented, and what is a placeholder.
 | Guardrails and output judge | **Real** — deterministic, both sides of the graph; urgency never model-set |
 | PHI boundary | **Real** — per-route allowlist, pseudonymisation, egress guard, audit |
 | Private chat | **Real** — encrypted under a PBKDF2 key derived from the user's PIN; absent from history; 12-hour expiry |
+| Autonomy layer | **Real** — 4 scheduled detectors, durable task queue, dedupe by intent, `SKIP LOCKED` claiming, advisory-lock singleton |
+| Agent actions | **Real** — T0/T1/T2 risk ladder, proposals re-authorised at execution, one shared booking path |
+| SMS delivery | **Path real, gateway not connected** — routing, quiet hours, escalation and the no-clinical-content rule all run; the no-op provider records attempts |
 | Encryption at rest | **Real** — AES-256-GCM over conversation content, versioned ciphertext, 90-day retention |
 | Web search | **Real when `TAVILY_API_KEY` is set** — domain-ranked, dosing text stripped |
 | Model wording | **Real when any provider key is set** — deterministic composers otherwise |

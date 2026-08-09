@@ -176,6 +176,35 @@ session that fixed them; they are recorded because the causes repeat.
 **Current state:** `test_scenarios.py` 73/73, `tsc --noEmit` and `vite build`
 clean.
 
+### Phase 8 — The autonomy layer (2026-08-09)
+
+Prompted by the fairest criticism the project has had: *this is just a chatbot,
+there is no real agentic behaviour and no innovation.* Reading the code rather
+than defending it, that was substantially true. The agent graph was a pure
+acyclic DAG, every one of its eight tools was a read, and **nothing in the
+backend ran without an inbound HTTP request** — no scheduler, no worker, no
+timer anywhere.
+
+The response was not to make the chat cleverer. It was to make the system act
+on what it already knows:
+
+- **A scheduler and a durable task queue** — APScheduler in-process, work items
+  in `agent_tasks`, three independent idempotency mechanisms.
+- **Four detectors** — unconverted referrals, missed doses, elapsed
+  appointments, lapsed check-ins.
+- **A write-action registry with a risk ladder** — T0 executes, T1 proposes,
+  T2 does not exist.
+- **A delivery layer** — urgency-routed, quiet hours, SMS that carries no
+  clinical content.
+
+Three columns that had been dead since the beginning came alive as a
+side-effect: `consecutive_missed_checkins` (only ever reset, never
+incremented), `missed_checkin_alert_threshold` (read by no code at all), and
+`Appointment.recommendation_id` (written at booking, never queried).
+
+**Current state:** `test_scenarios.py` 73/73, `test_agentic.py` 23/23, `tsc
+--noEmit` and `vite build` clean.
+
 ---
 
 ## Architecture as it stands
@@ -325,6 +354,60 @@ sense when a PIN guarded one conversation — deleting it only cost an intruder.
 Once a single PIN guards them all, self-destruction hands anyone holding the
 phone a way to erase every private chat in five guesses. It now locks for 15
 minutes instead.
+
+### Why detectors only enqueue, and never act
+
+The temptation with a scheduled job is to have it do the thing: find the
+stalled referral, send the nudge. That design has no safe failure mode — a
+detector that runs twice sends twice, and a detector that runs every fifteen
+minutes sends every fifteen minutes.
+
+Splitting it means the safety property lives in the database rather than in
+the care of whoever writes the next detector. A detector proposes an
+`AgentTask` with a `dedupe_key` describing *what it noticed*
+(`referral_unconverted:{id}:{stage}`), the column is UNIQUE, and a repeat
+insert is rejected. The handler cannot double-send because it is never invoked
+a second time.
+
+Handler-level idempotency is the more common answer and it is weaker: it
+requires every handler author to think about it, and it fails silently when
+one does not.
+
+### Why approvals use a ledger rather than LangGraph `interrupt()`
+
+`interrupt()` plus a checkpointer is the documented pattern for
+human-in-the-loop, and it is the wrong fit here for two reasons.
+
+The practical one: a durable Postgres checkpointer needs
+`langgraph-checkpoint-postgres`, which wants `psycopg>=3` alongside the pinned
+`psycopg2-binary`. Only `MemorySaver` is installed, and an in-process
+checkpointer cannot survive the restart it exists to survive.
+
+The structural one matters more. A graph interrupt only serves approvals that
+originate *inside a chat turn*. Most proposals here come from a background job
+with no graph thread at all, and the human may answer hours later, long after
+any request has ended. One mechanism has to serve both, and a table does —
+while also being queryable by the guardian dashboard and auditable, which the
+safety story needs anyway.
+
+### Why the risk ladder has a tier that does not exist
+
+T2 — prescribing, diagnoses, clinical notes, urgency, consent changes — is not
+implemented as "requires extra approval". Those actions are **absent from the
+registry**, so `actions.get()` raises for them exactly as it would for a typo.
+
+An action that exists but is gated is one bug away from being ungated. An
+action that was never written cannot be reached by a prompt injection, a
+mis-parsed model response, or a future contributor who adds a convenience path
+around the check.
+
+### Why a wrong PIN locks and a wrong nudge does not delete
+
+Both came from the same reasoning applied twice. Once one PIN guards every
+private chat, self-destruct hands anyone holding the phone a way to erase all
+of them. Once one detector watches every recommendation, unbounded nudging
+hands the system a way to make itself ignored. In each case the aggressive
+behaviour was safe only while the blast radius was one item.
 
 ### Why a hand-written Markdown renderer
 
@@ -564,6 +647,58 @@ a fallback.
 encryption feature that is tested through its own API tests nothing — both
 sides of the round trip agree whether or not the key exists.
 
+### 15. The detector that could not detect the thing it was for
+
+`detect_missed_medication` walked the last ten `MedicationLog` rows looking for
+a run marked `MISSED`. It had been there since the elderly-care work and it
+could never have fired for the case it was written for.
+
+`MedicationLog` rows are created only when a patient *tells* the app what they
+did. Someone who has stopped taking a medication has also stopped opening the
+app about it, so no row appears at all. The detector could only find people who
+were diligently logging their own non-adherence — the opposite of the group it
+was meant to protect. Missed doses are **absent rows, not `MISSED` rows.**
+
+The fix is a materialiser that writes the row the patient's silence implies,
+which then required a `UNIQUE (medication_id, due_at)` constraint to stay
+idempotent — and that constraint closed a second, unrelated race where two
+concurrent posts for the same dose each created a row and the adherence count
+read double.
+
+**Lesson:** a detector over data that only exists when someone reports it can
+only see people who report. Check what *creates* a row before trusting a query
+over it.
+
+### 16. My own splice deleted a class
+
+Replacing the body of `detect_missed_medication` with a call to the extracted
+service was done by string surgery: find the function, find the next
+`@router`, replace everything between. Between them sat `class VitalRequest`
+and a section header, both of which disappeared. `pyflakes` caught it
+immediately (`undefined name 'VitalRequest'`), and `git show HEAD:` restored
+it.
+
+**Lesson:** when a script edits by locating boundaries, the boundary is rarely
+where the intent ends. Diff the result against `HEAD` and read the removed
+lines — `git diff | grep "^-"` took ten seconds and would have caught it
+without the linter.
+
+### 17. The alert-fatigue cap failed a test by working
+
+First run of the referral detector against seeded data produced **15
+proposals for one patient**, who had 68 active recommendations. Correct by the
+letter of the rule, and useless: an inbox like that gets muted, and a muted
+channel is worse than no channel because the next message is ignored too.
+
+Adding a cap of three open follow-ups per person then broke the agentic suite,
+which had been seeding its fixture onto a patient already carrying a backlog —
+the budget was spent before the fixture was reached. The suite was reporting a
+failure that was the cap working.
+
+Fixed by seeding onto a patient with no competing recommendations, and by
+adding an explicit assertion that a patient with a large backlog stays capped,
+so the behaviour that caused the confusion is now the thing under test.
+
 ### 10. Smaller ones
 
 | Bug | Cause |
@@ -582,6 +717,33 @@ sides of the round trip agree whether or not the key exists.
 ---
 
 ## What is not done
+
+### Known gaps in the autonomy layer
+
+- **The scheduler lives in the API process** and dies with it. Fine for one
+  machine; `app/worker.py` is the documented path to a second process, and the
+  advisory lock already makes running both safe rather than duplicated.
+- **No ReAct loop.** The agent graph is still a single-pass DAG: the LLM does
+  not choose tools, cannot retry, and `judge` can block an answer but not ask
+  for a better one. This was deliberately deferred — a loop over eight
+  read-only tools is still fairly called a chatbot talking to itself, and the
+  detectors are what change the category. Next phase: replace `fulfil_node`
+  with a bounded plan→act→observe→reflect cycle (max 4 steps, wall-clock
+  deadline, repeat-call detector) and add one judge regeneration.
+- **No evaluation harness.** The claim is demonstrated, not measured. The
+  expensive part — the virtual clock — already exists, so what remains is
+  scenario fixtures, an ablation switch (`agentic_enabled`), and the metrics:
+  task success, action precision, false-alert rate, time-to-detection, and the
+  autonomy ratio. Baseline for the last two is *infinite* and *zero*
+  respectively, which is the cleanest before/after framing available.
+- **Referral rows are not yet a detection source.** Only `Recommendation` is.
+  Referrals carry no capability requirements, so a proposal built from one
+  would be less specific and needs its own matching path.
+- **T1 is one action.** `book_appointment` is wired end to end; reschedule,
+  cancel, enrol and share-record are specified but not implemented.
+- **Escalation to SMS is never exercised in practice**, because the no-op
+  provider is the only one. The routing, quiet-hour deferral and unread check
+  all run and are recorded.
 
 ### Known gaps in encryption
 
@@ -705,11 +867,17 @@ cd backend
 PYTHONPATH=. .venv/bin/uvicorn app.main:app --port 8000   # in one shell
 PYTHONPATH=. .venv/bin/python tests/test_scenarios.py     # 73 checks
 PYTHONPATH=. .venv/bin/python tests/test_agent.py         # 19 checks
+PYTHONPATH=. .venv/bin/python tests/test_agentic.py       # 23 checks
 ```
 
 `test_agent.py` asserts *properties* — consent enforcement, guardrail
 behaviour, that urgency stays deterministic — rather than the wording of any
 answer. Keep it that way; wording changes with the provider.
+
+`test_agentic.py` drives the autonomy layer against a **virtual clock**
+(`app/services/clock.py`), which is why every detector must read time through
+it rather than calling `datetime.now()`. Break that and a 30-day escalation
+ladder becomes untestable.
 
 Frontend: `cd frontend && npx tsc --noEmit`.
 
