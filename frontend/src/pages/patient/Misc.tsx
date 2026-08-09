@@ -12,6 +12,7 @@ import {
   formatDateTime,
   relativeDay,
 } from "../../components/ui";
+import { ProposalInbox } from "../../components/Proposals";
 import { api, errorMessage } from "../../lib/api";
 
 /* --------------------------------------------------------- Appointments */
@@ -408,6 +409,11 @@ export function Notifications() {
           </button>
         )}
       </header>
+
+      {/* Anything the system prepared on its own sits above the log of things
+          that already happened — it is the only part of this page that still
+          needs a decision. */}
+      <ProposalInbox />
 
       {data.notifications.length === 0 ? (
         <Empty title="No notifications" />
