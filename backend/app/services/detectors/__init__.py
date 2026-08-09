@@ -15,6 +15,12 @@ key. Nothing depends on the detector being careful.
 
 from __future__ import annotations
 
-from app.services.detectors import referrals  # noqa: F401  registers job + handler
+# Importing each module is what registers its scheduled job and its task
+# handler. Listed explicitly rather than discovered, so the set of things this
+# system does on its own is greppable in one place.
+from app.services.detectors import appointments  # noqa: F401
+from app.services.detectors import checkins  # noqa: F401
+from app.services.detectors import medication  # noqa: F401
+from app.services.detectors import referrals  # noqa: F401
 
-__all__ = ["referrals"]
+__all__ = ["appointments", "checkins", "medication", "referrals"]
