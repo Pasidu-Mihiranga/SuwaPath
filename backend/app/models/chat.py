@@ -96,3 +96,37 @@ class ChatMessage(Base, TimestampMixin):
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     session: Mapped[ChatSession] = relationship(back_populates="messages")
+
+
+class PrivateChatPin(Base, TimestampMixin):
+    """One private-chat PIN per person, rather than one per conversation.
+
+    A per-session PIN forced an impossible choice on resume: with only a PIN to
+    go on, the server could not tell which conversation was meant, so a wrong
+    guess had to count against every private session the user had. One PIN per
+    person removes the ambiguity entirely — the PIN identifies the person, and
+    the person's private sessions are then all reachable.
+
+    Failed attempts lock the PIN for a while instead of destroying anything.
+    Destruction made sense when a wrong PIN could only mean an intruder on one
+    conversation; now that a single PIN guards every private chat, deleting
+    them all on five wrong guesses would hand any passer-by a way to wipe the
+    lot. A lockout costs an attacker time and costs the owner nothing
+    permanent.
+
+    This table is deliberately separate from `users`: it holds a credential,
+    not a profile attribute, and keeping it apart means a query for user data
+    does not casually carry a PIN verifier along with it.
+    """
+
+    __tablename__ = "private_chat_pins"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    pin_hash: Mapped[str] = mapped_column(String(255))
+    pin_salt: Mapped[str] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

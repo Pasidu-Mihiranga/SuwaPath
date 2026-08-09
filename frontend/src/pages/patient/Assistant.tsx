@@ -642,8 +642,7 @@ export default function Assistant() {
             />
             <p className="text-xs text-programme-text">
               Nothing here is saved to your history. It disappears after 12
-              hours, and only your PIN can reopen it — the PIN cannot be
-              recovered.
+              hours, and only your private PIN can reopen it.
             </p>
           </div>
         )}
@@ -1387,9 +1386,9 @@ function PinDialog({
           <div className="min-w-0">
             <h2 className="font-semibold text-ink-900">Start a private chat</h2>
             <p className="mt-1 text-sm text-ink-600">
-              Nothing you say is written to your history. Choose a 6-digit PIN —
-              it is the only way to reopen this conversation, and it cannot be
-              recovered.
+              Nothing you say is written to your history. Enter your 6-digit
+              private PIN — the same PIN opens every private chat you start,
+              and it cannot be recovered if you forget it.
             </p>
           </div>
         </div>
@@ -1456,8 +1455,8 @@ function ResumeDialog({
           <div className="min-w-0">
             <h2 className="font-semibold text-ink-900">Resume a private chat</h2>
             <p className="mt-1 text-sm text-ink-600">
-              Enter the PIN you chose. Too many wrong attempts will delete the
-              conversation.
+              Enter your private PIN to reopen your most recent private chat.
+              Too many wrong attempts lock it for a while; nothing is deleted.
             </p>
           </div>
         </div>
