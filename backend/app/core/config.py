@@ -12,6 +12,7 @@ import getpass
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -101,6 +102,11 @@ class Settings(BaseSettings):
     suwapath_encryption_key: str = ""
 
     # --- CORS ---
+    # The deployed frontend and API live on different origins (the SPA on a
+    # CDN, the API in a container), so the browser preflights every call.
+    # Auth travels as a Bearer header from localStorage rather than a cookie,
+    # so this needs no credentialed-origin handling — just the exact origin.
+    # Set CORS_ORIGINS as a JSON list to add the deployed frontend.
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -108,6 +114,9 @@ class Settings(BaseSettings):
         "http://localhost:5174",
         "http://127.0.0.1:5174",
     ]
+    # Convenience for platforms that only offer single string variables:
+    # a comma-separated list, merged with the above.
+    extra_cors_origins: str = ""
 
     @property
     def groq_enabled(self) -> bool:
@@ -128,6 +137,32 @@ class Settings(BaseSettings):
     @property
     def tavily_enabled(self) -> bool:
         return bool(self.tavily_api_key and self.tavily_api_key.strip())
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        extra = [o.strip() for o in self.extra_cors_origins.split(",") if o.strip()]
+        return list(dict.fromkeys([*self.cors_origins, *extra]))
+
+    @model_validator(mode="after")
+    def _derive_storage_paths(self) -> "Settings":
+        """Let one variable move all the runtime directories.
+
+        Each path is its own field so it can be pinned individually, but a
+        container only wants to say "put writable state here" once. Anything
+        still sitting under the default root follows `storage_dir`; anything
+        set explicitly is left alone.
+        """
+        default_root = BACKEND_ROOT / "storage"
+        if self.storage_dir != default_root:
+            for field, leaf in (
+                ("document_dir", "documents"),
+                ("image_dir", "images"),
+                ("heatmap_dir", "heatmaps"),
+                ("qdrant_path", "qdrant"),
+            ):
+                if getattr(self, field) == default_root / leaf:
+                    object.__setattr__(self, field, self.storage_dir / leaf)
+        return self
 
     def ensure_directories(self) -> None:
         for path in (

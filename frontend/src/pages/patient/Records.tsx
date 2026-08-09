@@ -310,14 +310,14 @@ export function Imaging() {
         <Card title="Screening result">
           <div className="grid md:grid-cols-2 gap-5">
             <div className="space-y-3">
-              <img
+              {/* AuthedImage, not a plain <img>: this endpoint requires a
+                  bearer token, which a browser image request never sends, so
+                  the tag below used to 401 and render nothing. The heatmap
+                  underneath already did it correctly. */}
+              <AuthedImage
                 src={`${API_BASE}/api/v1/images/${selected.id}/file`}
                 alt="Uploaded medical image"
                 className="w-full rounded-xl border border-ink-100 bg-ink-900"
-                crossOrigin="anonymous"
-                onError={(event) => {
-                  (event.target as HTMLImageElement).style.display = "none";
-                }}
               />
               {selected.analysis.has_visual_explanation && (
                 <div>
@@ -434,7 +434,15 @@ export function Imaging() {
 }
 
 /** Image endpoints require a bearer token, so fetch as a blob. */
-function AuthedImage({ src }: { src: string }) {
+function AuthedImage({
+  src,
+  alt = "Model attention heatmap",
+  className = "w-full rounded-xl border border-ink-100",
+}: {
+  src: string;
+  alt?: string;
+  className?: string;
+}) {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -452,11 +460,5 @@ function AuthedImage({ src }: { src: string }) {
   }, [src]);
 
   if (!url) return null;
-  return (
-    <img
-      src={url}
-      alt="Model attention heatmap"
-      className="w-full rounded-xl border border-ink-100"
-    />
-  );
+  return <img src={url} alt={alt} className={className} />;
 }
