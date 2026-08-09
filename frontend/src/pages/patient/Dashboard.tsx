@@ -13,6 +13,7 @@ import {
   formatDateTime,
   relativeDay,
 } from "../../components/ui";
+import { ProposalInbox } from "../../components/Proposals";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { patientIllustration, programmeIllustration } from "../../lib/illustration";
@@ -123,6 +124,10 @@ export default function PatientDashboard() {
   return (
     <div className="space-y-6">
       {/* Welcome + primary action */}
+      {/* Suggestions the system prepared without being asked. First on the
+          page because they are the only thing here awaiting a decision. */}
+      <ProposalInbox />
+
       {/* Two independent columns rather than a row of grid cells. In a plain
           grid every card in a row waits for the tallest one, which left a band
           of empty space under the short hero next to the long recommendation.
