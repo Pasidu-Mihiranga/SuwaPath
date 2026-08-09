@@ -115,11 +115,21 @@ def schedule_reminder(
     title: str,
     body: str,
     when: datetime | None = None,
+    category: NotificationCategory = NotificationCategory.FOLLOW_UP,
     **_: Any,
 ) -> dict[str, Any]:
+    # The category comes from the caller, which always knows what the reminder
+    # is about. Adding a catch-all `REMINDER` member instead would have been
+    # easier and wrong: the notifications UI filters by category, so a bucket
+    # that means "something" makes every other filter incomplete.
+    try:
+        category = NotificationCategory(str(category))
+    except ValueError as exc:
+        raise ActionError(f"Unknown notification category {category!r}.") from exc
+
     notification = Notification(
         user_id=patient.id,
-        category=NotificationCategory.REMINDER,
+        category=category,
         priority=NotificationPriority.NORMAL,
         title=title[:160],
         body=body,
