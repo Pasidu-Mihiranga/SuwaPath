@@ -57,8 +57,10 @@ class NewSessionRequest(BaseModel):
 
 
 class ResumeRequest(BaseModel):
-    session_id: str
+    # The PIN alone identifies the chat among the caller's own private
+    # sessions; session_id stays accepted so existing callers keep working.
     pin: str = Field(min_length=6, max_length=6)
+    session_id: str | None = None
 
 
 def _session_summary(session: ChatSession) -> dict:
@@ -146,9 +148,14 @@ def resume_private_session(
     db: Session = Depends(get_db),
 ) -> dict:
     try:
-        session = chat_store.resume_private(
-            db, payload.session_id, current_user.id, payload.pin
-        )
+        if payload.session_id:
+            session = chat_store.resume_private(
+                db, payload.session_id, current_user.id, payload.pin
+            )
+        else:
+            session = chat_store.resume_private_by_pin(
+                db, current_user.id, payload.pin
+            )
     except chat_store.ChatError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 

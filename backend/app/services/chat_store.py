@@ -189,6 +189,62 @@ def resume_private(db: Session, session_id: str, user_id: str, pin: str) -> Chat
     raise ChatError(f"Incorrect PIN. {remaining} attempt(s) left.")
 
 
+def resume_private_by_pin(db: Session, user_id: str, pin: str) -> ChatSession:
+    """Reopen a private session knowing only its PIN.
+
+    Requiring a session id as well was a UI failure dressed up as security. The
+    id is not a secret — it identifies the row, and it is already scoped to the
+    caller's own account, so asking the user to keep a UUID safe bought nothing
+    and made the feature unusable in practice.
+
+    The search is over the caller's own live private sessions only, so the PIN
+    is never tested against anyone else's conversation. In the ordinary case
+    there is exactly one.
+
+    A wrong PIN counts against every candidate, because the server genuinely
+    cannot tell which one was meant. With a single private chat — the normal
+    situation — that is identical to the old behaviour.
+    """
+    now = datetime.now(timezone.utc)
+    candidates = list(
+        db.execute(
+            select(ChatSession).where(
+                ChatSession.user_id == user_id,
+                ChatSession.is_private.is_(True),
+            )
+        ).scalars()
+    )
+
+    live: list[ChatSession] = []
+    for session in candidates:
+        if session.expires_at and session.expires_at < now:
+            destroy(db, session)
+        else:
+            live.append(session)
+
+    if not live:
+        raise ChatError("There is no private chat to reopen.")
+
+    for session in live:
+        if verify_pin(session, pin):
+            session.pin_attempts = 0
+            db.commit()
+            return session
+
+    lowest_remaining = MAX_PIN_ATTEMPTS
+    for session in live:
+        session.pin_attempts += 1
+        remaining = MAX_PIN_ATTEMPTS - session.pin_attempts
+        lowest_remaining = min(lowest_remaining, remaining)
+        if remaining <= 0:
+            destroy(db, session)
+    db.commit()
+
+    if lowest_remaining <= 0:
+        raise ChatError("Too many incorrect PINs — the conversation has been deleted.")
+    raise ChatError(f"Incorrect PIN. {lowest_remaining} attempt(s) left.")
+
+
 def destroy(db: Session, session: ChatSession) -> None:
     """Remove a session and everything associated with it."""
     private_buffer.drop(session.id)
