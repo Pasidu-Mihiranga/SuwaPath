@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -225,7 +226,14 @@ class MedicationLog(Base, TimestampMixin):
     """One scheduled dose and what the patient did about it."""
 
     __tablename__ = "medication_logs"
-    __table_args__ = (Index("ix_medlog_patient_due", "patient_user_id", "due_at"),)
+    __table_args__ = (
+        Index("ix_medlog_patient_due", "patient_user_id", "due_at"),
+        # One row per scheduled dose. Two things depend on this: the job that
+        # materialises overdue doses relies on it to stay idempotent, and it
+        # closes a race where two concurrent posts for the same dose each
+        # created a row and the adherence count then read double.
+        UniqueConstraint("medication_id", "due_at", name="uq_medlog_dose"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
     medication_id: Mapped[str] = mapped_column(

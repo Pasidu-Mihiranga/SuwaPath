@@ -43,6 +43,7 @@ from app.models.enums import (
 from app.models.identity import User
 from app.models.platform import Notification
 from app.services import timeslots
+from app.services.detectors import medication as medication_detector
 from app.services.red_flag_engine import assess_concepts, build_context
 
 router = APIRouter(prefix="/care", tags=["care-programmes"])
@@ -604,64 +605,21 @@ def detect_missed_medication(
 
     Pattern-based on purpose: guardians are alerted on a *run* of missed doses,
     not on every single event (spec §14).
+
+    The detection itself lives in `services/detectors/medication.py`, because
+    the same check now runs on a schedule. Leaving a copy here would let the
+    two definitions of "a run" drift apart, and the scheduled one is the copy
+    that matters — a patient who has stopped taking their medication is not
+    going to open the app and press this.
     """
+    raised = medication_detector.detect_for_patient(db, current_user)
     record = db.execute(
         select(ElderlyRecord).where(ElderlyRecord.patient_user_id == current_user.id)
     ).scalar_one_or_none()
-    threshold = record.missed_medication_alert_threshold if record else 2
-
-    medications = db.execute(
-        select(Medication).where(
-            Medication.patient_user_id == current_user.id,
-            Medication.is_active.is_(True),
-        )
-    ).scalars().all()
-
-    raised = []
-    for medication in medications:
-        logs = db.execute(
-            select(MedicationLog)
-            .where(MedicationLog.medication_id == medication.id)
-            .order_by(MedicationLog.due_at.desc())
-            .limit(10)
-        ).scalars().all()
-
-        consecutive = 0
-        for log in logs:
-            if str(log.status) == str(MedicationLogStatus.MISSED):
-                consecutive += 1
-            else:
-                break
-
-        if consecutive >= threshold:
-            count = raise_guardian_alerts(
-                db,
-                patient=current_user,
-                alert_type="missed_medication_pattern",
-                severity=(
-                    AlertSeverity.CRITICAL if medication.is_critical else AlertSeverity.ATTENTION
-                ),
-                title="Repeated missed medication",
-                detail=(
-                    f"{current_user.full_name} has missed {consecutive} consecutive "
-                    f"doses of {medication.name} {medication.dosage}."
-                ),
-                permission=GuardianPermissionType.MEDICATIONS,
-                meta={
-                    "medication": f"{medication.name} {medication.dosage}",
-                    "consecutive_missed": consecutive,
-                },
-            )
-            raised.append(
-                {
-                    "medication": medication.name,
-                    "consecutive_missed": consecutive,
-                    "guardians_alerted": count,
-                }
-            )
-
-    db.commit()
-    return {"threshold": threshold, "alerts": raised}
+    return {
+        "threshold": record.missed_medication_alert_threshold if record else 2,
+        "alerts": raised,
+    }
 
 
 # --------------------------------------------------------------------------
