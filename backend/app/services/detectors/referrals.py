@@ -343,13 +343,16 @@ def handle(db: Session, task: AgentTask) -> None:
         # action is to make the reminder unmissable to the people already
         # entitled to see it, and stop.
         from app.models.enums import NotificationCategory, NotificationPriority
-        from app.models.platform import Notification
+        from app.services.delivery import Message, deliver
 
-        db.add(
-            Notification(
-                user_id=patient.id,
-                category=NotificationCategory.SYSTEM,
-                priority=NotificationPriority.CRITICAL,
+        # Routed through the delivery layer rather than written straight to
+        # the notifications table: this is the one stage where the patient not
+        # opening the app is the whole problem, so it earns a second channel.
+        # The SMS carries no clinical detail — see services/delivery/sms.py.
+        deliver(
+            db,
+            patient,
+            Message(
                 title="Please arrange your appointment",
                 body=(
                     f"You were advised to see a "
@@ -358,11 +361,12 @@ def handle(db: Session, task: AgentTask) -> None:
                     "If something is making this difficult, call SuwaPath Care "
                     "on 0112 123 456."
                 ),
+                priority=str(NotificationPriority.CRITICAL),
+                category=str(NotificationCategory.SYSTEM),
                 action_type="recommendation",
                 action_id=rec.id,
-            )
+            ),
         )
-        db.commit()
 
     elif stage == "close":
         # A routine suggestion nobody acted on in a month is not an emergency;
