@@ -40,8 +40,9 @@ from app.models.enums import (
     UserRole,
     WellbeingStatus,
 )
-from app.models.identity import GuardianRelationship, User
-from app.models.platform import GuardianAlert, Notification
+from app.models.identity import User
+from app.models.platform import Notification
+from app.services import timeslots
 from app.services.red_flag_engine import assess_concepts, build_context
 
 router = APIRouter(prefix="/care", tags=["care-programmes"])
@@ -50,64 +51,10 @@ router = APIRouter(prefix="/care", tags=["care-programmes"])
 # --------------------------------------------------------------------------
 # Guardian alert helper (consent-aware)
 # --------------------------------------------------------------------------
-def raise_guardian_alerts(
-    db: Session,
-    *,
-    patient: User,
-    alert_type: str,
-    severity: AlertSeverity,
-    title: str,
-    detail: str,
-    permission: GuardianPermissionType,
-    meta: dict | None = None,
-) -> int:
-    """Notify guardians who hold the required consent scope (rule 6)."""
-    relationships = db.execute(
-        select(GuardianRelationship)
-        .options(selectinload(GuardianRelationship.permissions))
-        .where(
-            GuardianRelationship.patient_user_id == patient.id,
-            GuardianRelationship.is_active.is_(True),
-        )
-    ).scalars().unique().all()
-
-    raised = 0
-    for relationship in relationships:
-        granted = relationship.granted_scopes()
-        if not (
-            permission in granted or GuardianPermissionType.FULL_MEDICAL in granted
-        ):
-            continue
-
-        db.add(
-            GuardianAlert(
-                patient_user_id=patient.id,
-                guardian_user_id=relationship.guardian_user_id,
-                alert_type=alert_type,
-                severity=severity,
-                title=title,
-                detail=detail,
-                required_permission=str(permission),
-                meta=meta or {},
-            )
-        )
-        db.add(
-            Notification(
-                user_id=relationship.guardian_user_id,
-                category=NotificationCategory.GUARDIAN_ALERT,
-                priority=(
-                    NotificationPriority.CRITICAL
-                    if severity == AlertSeverity.CRITICAL
-                    else NotificationPriority.HIGH
-                ),
-                title=title,
-                body=detail,
-                about_patient_user_id=patient.id,
-                action_type="guardian_alert",
-            )
-        )
-        raised += 1
-    return raised
+# Lives in services/alerts.py so background detectors can raise alerts without
+# importing an API router. Re-exported here because the existing call sites in
+# this module read better unqualified.
+from app.services.alerts import raise_guardian_alerts  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -586,19 +533,13 @@ def list_medications(
 
 
 def _next_due(medication: Medication) -> datetime | None:
-    now = datetime.now(timezone.utc)
-    candidates = []
-    for offset in (0, 1):
-        day = now.date() + timedelta(days=offset)
-        for time_str in medication.schedule_times or []:
-            try:
-                hour, minute = (int(x) for x in time_str.split(":"))
-            except ValueError:
-                continue
-            candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=timezone.utc)
-            if candidate > now:
-                candidates.append(candidate)
-    return min(candidates) if candidates else None
+    """The next scheduled dose.
+
+    Delegates to `timeslots` because a second reader now exists — the job that
+    materialises overdue doses. This used to build times with `tzinfo=utc`,
+    which made a schedule of "08:00" mean 13:30 in Colombo.
+    """
+    return timeslots.next_due(medication.schedule_times)
 
 
 class MedicationLogRequest(BaseModel):

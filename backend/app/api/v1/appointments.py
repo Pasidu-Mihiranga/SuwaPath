@@ -11,32 +11,29 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_patient_profile, get_relationship, require_permission
+from app.api.deps import get_relationship, require_permission
 from app.core.db import get_db
 from app.core.security import get_current_user
 from app.models.care import Appointment
-from app.models.clinical import Recommendation
 from app.models.enums import (
     AppointmentStatus,
     GuardianPermissionType,
     NotificationCategory,
     NotificationPriority,
-    UrgencyLevel,
     UserRole,
     VisitType,
 )
 from app.models.identity import User
 from app.models.platform import Notification
-from app.models.providers import Doctor, Hospital
+from app.models.providers import Doctor
 from app.services.availability import (
     is_slot_free,
-    slot_duration_for,
     slot_matches_schedule,
 )
-from app.services.matching import haversine_km
+from app.services import booking
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
@@ -118,43 +115,10 @@ def _serialise(appointment: Appointment, *, include_patient: bool = False) -> di
     return data
 
 
-def _resolve_booking_patient(
-    db: Session, current_user: User, requested_patient_id: str | None
-) -> User:
-    """Determine who the appointment is for, enforcing guardian consent."""
-    role = str(current_user.role)
-
-    if role == str(UserRole.PATIENT):
-        if requested_patient_id and requested_patient_id != current_user.id:
-            raise HTTPException(
-                status_code=403, detail="You can only book appointments for yourself."
-            )
-        return current_user
-
-    if role == str(UserRole.GUARDIAN):
-        if not requested_patient_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Specify which dependent this appointment is for.",
-            )
-        relationship = get_relationship(db, current_user.id, requested_patient_id)
-        require_permission(relationship, GuardianPermissionType.APPOINTMENTS)
-        if not relationship.can_book_appointments:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "You have view access to appointments but have not been "
-                    "authorised to book on this person's behalf."
-                ),
-            )
-        patient = db.get(User, requested_patient_id)
-        if patient is None:
-            raise HTTPException(status_code=404, detail="Dependent not found.")
-        return patient
-
-    raise HTTPException(
-        status_code=403, detail="Only patients and authorised guardians can book."
-    )
+# Booking rules live in services/booking.py so that the action-approval
+# endpoint executes the identical checks. Aliased here for the existing
+# call sites in this module.
+_resolve_booking_patient = booking.resolve_booking_patient
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -163,149 +127,18 @@ def book(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    patient = _resolve_booking_patient(db, current_user, payload.patient_user_id)
-
-    doctor = db.execute(
-        select(Doctor)
-        .options(
-            selectinload(Doctor.schedules),
-            selectinload(Doctor.user),
-            selectinload(Doctor.specialty),
-            selectinload(Doctor.hospital),
-        )
-        .where(Doctor.id == payload.doctor_id)
-    ).scalar_one_or_none()
-    if doctor is None:
-        raise HTTPException(status_code=404, detail="Doctor not found.")
-    if not doctor.accepts_new_patients:
-        raise HTTPException(
-            status_code=409, detail="This doctor is not accepting new appointments."
-        )
-
-    start = payload.scheduled_start
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
-    if start <= datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="Choose a future appointment time.")
-
-    # Default to the doctor's own slot length rather than a fixed guess, so a
-    # booking occupies exactly the slot that was offered.
-    duration = payload.duration_minutes or slot_duration_for(doctor, start) or 20
-    end = start + timedelta(minutes=duration)
-
-    if not slot_matches_schedule(doctor, start, end):
-        raise HTTPException(
-            status_code=409,
-            detail="That time is outside the doctor's published clinic hours.",
-        )
-    if not is_slot_free(db, doctor.id, start, end):
-        raise HTTPException(
-            status_code=409, detail="That slot has just been taken. Choose another time."
-        )
-    if payload.visit_type == VisitType.TELECONSULTATION and not doctor.supports_teleconsultation:
-        raise HTTPException(
-            status_code=409, detail="This doctor does not offer teleconsultation."
-        )
-
-    recommendation = None
-    urgency = UrgencyLevel.ROUTINE
-    if payload.recommendation_id:
-        recommendation = db.get(Recommendation, payload.recommendation_id)
-        if recommendation and recommendation.patient_user_id == patient.id:
-            urgency = UrgencyLevel(str(recommendation.urgency))
-
-    profile = get_patient_profile(db, patient.id)
-    distance = None
-    if profile and doctor.hospital and profile.latitude and profile.longitude:
-        distance = round(
-            haversine_km(
-                profile.latitude, profile.longitude,
-                doctor.hospital.latitude, doctor.hospital.longitude,
-            ),
-            1,
-        )
-
-    now = datetime.now(timezone.utc)
-    appointment = Appointment(
-        patient_user_id=patient.id,
-        doctor_id=doctor.id,
-        hospital_id=doctor.hospital_id,
-        booked_by_user_id=current_user.id,
-        recommendation_id=recommendation.id if recommendation else None,
-        scheduled_start=start,
-        scheduled_end=end,
+    patient = booking.resolve_booking_patient(db, current_user, payload.patient_user_id)
+    appointment = booking.create_appointment(
+        db,
+        actor=current_user,
+        patient=patient,
+        doctor_id=payload.doctor_id,
+        scheduled_start=payload.scheduled_start,
         visit_type=payload.visit_type,
-        urgency=urgency,
-        status=AppointmentStatus.CONFIRMED,
+        duration_minutes=payload.duration_minutes,
         reason=payload.reason,
-        chief_complaint=(
-            recommendation.care_category if recommendation else payload.reason
-        ),
-        fee_lkr=(
-            doctor.teleconsultation_fee_lkr
-            if payload.visit_type == VisitType.TELECONSULTATION
-            else doctor.consultation_fee_lkr
-        ),
-        booked_at=now,
-        confirmed_at=now,
-        patient_distance_km=distance,
-        teleconsultation_url=(
-            f"https://meet.suwapath.lk/consult/{doctor.id[:8]}"
-            if payload.visit_type == VisitType.TELECONSULTATION
-            else None
-        ),
+        recommendation_id=payload.recommendation_id,
     )
-    db.add(appointment)
-    db.flush()
-
-    when = start.strftime("%d %b at %I:%M %p").replace(" 0", " ")
-    db.add(
-        Notification(
-            user_id=patient.id,
-            category=NotificationCategory.APPOINTMENT,
-            priority=NotificationPriority.NORMAL,
-            title="Appointment confirmed",
-            body=(
-                f"Your appointment with {doctor.user.full_name} is confirmed for "
-                f"{when}."
-            ),
-            action_type="appointment",
-            action_id=appointment.id,
-        )
-    )
-    # Reminder event, surfaced by the notifications endpoint when it falls due.
-    db.add(
-        Notification(
-            user_id=patient.id,
-            category=NotificationCategory.APPOINTMENT,
-            priority=NotificationPriority.HIGH,
-            title="Appointment reminder",
-            body=f"Your appointment with {doctor.user.full_name} is tomorrow.",
-            action_type="appointment",
-            action_id=appointment.id,
-            scheduled_for=start - timedelta(days=1),
-        )
-    )
-    # The doctor sees the new booking in their queue.
-    db.add(
-        Notification(
-            user_id=doctor.user_id,
-            category=NotificationCategory.APPOINTMENT,
-            priority=(
-                NotificationPriority.HIGH
-                if urgency in (UrgencyLevel.EMERGENCY, UrgencyLevel.URGENT)
-                else NotificationPriority.NORMAL
-            ),
-            title="New appointment booked",
-            body=f"{patient.full_name} booked a consultation for {when}.",
-            action_type="appointment",
-            action_id=appointment.id,
-            about_patient_user_id=patient.id,
-        )
-    )
-
-    db.commit()
-    db.refresh(appointment)
     return _serialise(appointment, include_patient=True)
 
 
