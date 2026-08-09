@@ -318,7 +318,7 @@ def handle(db: Session, task: AgentTask) -> None:
             db,
             patient=patient,
             alert_type="care_not_arranged",
-            severity=AlertSeverity.WARNING,
+            severity=AlertSeverity.ATTENTION,
             title="Recommended care has not been arranged",
             detail=(
                 f"{patient.full_name} was advised to see a "
@@ -362,7 +362,7 @@ def handle(db: Session, task: AgentTask) -> None:
                     "on 0112 123 456."
                 ),
                 priority=str(NotificationPriority.CRITICAL),
-                category=str(NotificationCategory.SYSTEM),
+                category=str(NotificationCategory.FOLLOW_UP),
                 action_type="recommendation",
                 action_id=rec.id,
             ),
