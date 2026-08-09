@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -35,25 +36,46 @@ logging.basicConfig(
 logger = logging.getLogger("suwapath")
 
 
+
+def _warm_retrieval_in_background() -> None:
+    """Build the vector index off the request path.
+
+    `ensure_ready()` loads every collection and upserts it, opening its own
+    database session for the provider directory when none is passed. That
+    makes it self-healing on a cold store, which is what matters where the
+    container filesystem is ephemeral: an embedded vector index does not
+    survive a rebuild, and without this the provider directory would silently
+    be missing until someone remembered to run the ingest CLI.
+    """
+
+    def warm() -> None:
+        try:
+            from app.services.knowledge import knowledge_service
+
+            knowledge_service.ensure_ready()
+            logger.info("Retrieval ready: %s", knowledge_service.backend)
+        except Exception:  # noqa: BLE001 - warming must never kill the process
+            logger.exception("Retrieval warm-up failed; TF-IDF fallback stands.")
+
+    threading.Thread(target=warm, name="retrieval-warm", daemon=True).start()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_all()
     settings.ensure_directories()
 
-    from app.services.ai_orchestrator import orchestrator_status
-
-    status = orchestrator_status()
-    logger.info(
-        "SuwaPath API ready | Gemini: %s | knowledge: %s",
-        "live" if status["gemini_reachable"] else "deterministic fallback",
-        status["knowledge_backend"],
-    )
-    if not status["gemini_reachable"]:
-        logger.warning(
-            "GEMINI_API_KEY is not configured. The AI orchestrator will use "
-            "deterministic fallbacks — every feature still works, but "
-            "conversation wording will be scripted rather than generated."
-        )
+    # Retrieval warms on a background thread rather than here.
+    #
+    # Reading `orchestrator_status()` touches `knowledge_service.backend`,
+    # which builds the embedding session and opens the vector store — on a
+    # cold container that means downloading ~90 MB and re-embedding the corpus
+    # before the first request is served. Blocking startup on it fails the
+    # platform health check, and a restart policy then turns that into a loop.
+    #
+    # Nothing needs retrieval to answer a login or a dashboard, and the
+    # knowledge tools already degrade to a TF-IDF index while it is warming.
+    _warm_retrieval_in_background()
 
     # The autonomy layer. Everything above this line only ever reacts to a
     # request; this is the one thing in the process that acts on its own.
@@ -79,7 +101,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -31,5 +31,6 @@ models/**/*.pth
 *.swp
 .claude/
 
-# Reference project (separate git repo, not part of SuwaPath)
+# Separate git repos vendored alongside, not part of SuwaPath
 aee-capstone/
+BioFusion/

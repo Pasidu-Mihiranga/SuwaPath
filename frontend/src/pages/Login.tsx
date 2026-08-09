@@ -1,10 +1,19 @@
 import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { ErrorNote } from "../components/ui";
 import Icon from "../components/Icon";
 import { errorMessage } from "../lib/api";
 import { HOME_BY_ROLE, useAuth } from "../lib/auth";
 import { loginIllustration } from "../lib/illustration";
+
+const DEMO_PASSWORD = "Demo@1234";
+
+const DEMO_ACCOUNTS = [
+  { label: "Patient", name: "Nimali Fernando", email: "patient@suwapath.lk" },
+  { label: "Doctor", name: "Dr. Dileepa Perera", email: "doctor@suwapath.lk" },
+  { label: "Guardian", name: "Nimal Fernando", email: "guardian@suwapath.lk" },
+  { label: "Hospital admin", name: "Chathurika Bandara", email: "hospital@suwapath.lk" },
+];
 
 export default function Login() {
   const { user, login, loading } = useAuth();
@@ -152,9 +161,11 @@ export default function Login() {
                   />
                   <span className="text-[14px] lg:text-[15px] text-ink-600 select-none">Remember me</span>
                 </label>
-                <Link to="/forgot-password" className="text-[14px] lg:text-[15px] text-brand-600 hover:text-brand-700 font-medium">
-                  Forgot password?
-                </Link>
+                {/* No password-reset flow exists yet, so this is text rather
+                    than a link to nowhere. */}
+                <span className="text-[14px] lg:text-[15px] text-ink-400">
+                  Contact support to reset
+                </span>
               </div>
 
               {error && <ErrorNote message={error} />}
@@ -171,27 +182,41 @@ export default function Login() {
               <div className="h-px bg-ink-100 flex-1"></div>
             </div>
 
-            <div className="mt-4 lg:mt-6 flex justify-center">
-              <button 
-                type="button" 
-                className="flex items-center justify-center gap-3 w-full border border-ink-200 rounded-xl py-2.5 lg:py-3.5 hover:bg-ink-50 transition-colors shadow-sm"
-                onClick={() => {}}
-              >
-                <svg className="w-4 h-4 lg:w-5 lg:h-5" viewBox="0 0 24 24">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-                </svg>
-                <span className="text-ink-800 font-semibold text-[14px] lg:text-[15px]">Continue with Google</span>
-              </button>
+            {/* Demo accounts.
+                Every record in this deployment is synthetic and these
+                credentials are already published in the README, so putting
+                them on screen costs nothing and saves a reviewer from having
+                to go looking. Clicking fills the form rather than signing in,
+                so the normal login path is still the one being exercised. */}
+            <div className="mt-4 lg:mt-6">
+              <p className="text-[12px] lg:text-[13px] text-ink-500 text-center mb-2">
+                Explore with a demo account — synthetic data
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {DEMO_ACCOUNTS.map((account) => (
+                  <button
+                    key={account.email}
+                    type="button"
+                    onClick={() => {
+                      setEmail(account.email);
+                      setPassword(DEMO_PASSWORD);
+                      setError(null);
+                    }}
+                    className="rounded-xl border border-ink-200 px-3 py-2 text-left transition hover:bg-ink-50"
+                  >
+                    <span className="block text-[13px] font-semibold text-ink-800">
+                      {account.label}
+                    </span>
+                    <span className="block text-[11px] text-ink-500">
+                      {account.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <p className="mt-4 lg:mt-8 mb-2 lg:mb-0 text-center text-[13px] lg:text-[15px] text-ink-600">
-              Don't have an account?{" "}
-              <Link to="/register" className="text-brand-600 font-semibold hover:underline">
-                Create account
-              </Link>
+              Sign-up is not open in this preview — use a demo account above.
             </p>
 
             {/* Mobile security note */}

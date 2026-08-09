@@ -1,0 +1,37 @@
+# Keep the build context small. The image carries the API only — the SPA is
+# deployed separately — so everything to do with the frontend, the training
+# repo and local runtime state stays out.
+
+.git
+.gitignore
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+
+# Frontend: built and hosted elsewhere.
+frontend/
+
+# Separate repos vendored alongside.
+BioFusion/
+aee-capstone/
+
+# Local runtime state. The container creates its own under STORAGE_DIR.
+backend/storage/documents/*
+backend/storage/images/*
+backend/storage/heatmaps/*
+backend/storage/qdrant/
+
+# Secrets never belong in an image layer.
+.env
+.env.*
+!.env.example
+
+# Docs and scratch.
+*.md
+!models/**/*.md
+Logos/
+Ui mocks/
+UI images/
+.claude/
+.DS_Store
