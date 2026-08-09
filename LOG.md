@@ -113,7 +113,7 @@ three separate screens should have been one.
 
 The diagnosis turned out to be a single root cause with wide blast radius —
 see [the Gemini quota
-finding](#2-every-answer-was-a-database-dump-gemini-quota-was-zero).
+finding](#2-every-answer-was-a-database-dump--gemini-quota-was-zero).
 
 What shipped: multi-provider LLM router, doctor-style consultation, CAG,
 chat persistence, private mode, guarded web search, markdown rendering,
@@ -145,6 +145,36 @@ Two availability bugs found and fixed on the way; see
 
 **Current state:** `test_agent.py` 19/19, `test_scenarios.py` 73/73, a new
 16-check feature suite, `tsc --noEmit` and `vite build` clean.
+
+### Phase 7 — Interface polish and encryption at rest (2026-08-09)
+
+Driven almost entirely by the user looking at real screens and saying what was
+wrong. Most of the UI defects in this phase were introduced by the same
+session that fixed them; they are recorded because the causes repeat.
+
+- **Illustrations were invisible.** The source art was framed cards with an
+  opaque pale background; laid over a pale gradient they read as nothing. Cut
+  to transparency with a border-seeded flood fill — see
+  [Bugs](#13-the-illustration-that-was-rendering-all-along).
+- **Programme artwork was never wired up.** `programmeIllustration()` existed,
+  was correct, and was never called.
+- **Gender-aware artwork** now has a source: an optional Sex field on the
+  account page, plus `sex` on `PATCH /auth/me`. Before this the only value
+  came from the seeder, so the feature worked in the demo and was inert for
+  real accounts. Unset clears the stored value — a field about identity has to
+  be retractable.
+- **Encryption at rest** — AES-256-GCM over conversation content, PIN-derived
+  keys for private transcripts, 90-day retention. See
+  [Decisions](#why-private-mode-moved-from-storing-nothing-to-pin-derived-encryption).
+- **Private chat became reachable.** The resume endpoint had existed and was
+  never called by any UI.
+- **Assistant layout** — mode toggle moved into the composer, history moved to
+  a frosted panel behind a corner button.
+- **Full-width buttons removed** across nine call sites; `sp-btn-block` is now
+  the only way to opt in, documented as narrow-container-only.
+
+**Current state:** `test_scenarios.py` 73/73, `tsc --noEmit` and `vite build`
+clean.
 
 ---
 
@@ -254,15 +284,47 @@ likely thing for a future contributor to "improve". An LLM judge that can
 raise urgency turns every prompt-injection payload into an emergency
 generator. Escalation stays one-way and non-AI.
 
-### Why private mode stores nothing rather than encrypting
+### Why private mode moved from storing nothing to PIN-derived encryption
 
-The realistic threat is not a database attacker. It is a shared phone, a
-family member, a partner. Encryption at rest does not help against someone
-holding an unlocked session. So a private session writes **no message bodies
-at all** — not encrypted, not hashed, never written. The row holds an id, an
-owner, a PBKDF2 PIN verifier and an expiry.
+**Superseded 2026-08-09.** The original design wrote no message bodies at all:
+the transcript lived in a process-local buffer and the row held only an id, an
+owner, a PIN verifier and an expiry. The reasoning was that the realistic
+threat is a shared phone rather than a database attacker, and encryption at
+rest does not help against someone holding an unlocked session.
 
-Losing the PIN means losing the conversation. That is the feature.
+That reasoning was sound and the implementation still failed, because
+"process-local" was doing more work than anyone noticed. A restart, a deploy,
+or simply a second Gunicorn worker answering the request lost the
+conversation. Resume returned an empty transcript. The privacy property was
+real; the feature was not.
+
+Now the transcript is stored encrypted under a key derived from the PIN with
+PBKDF2 and never written down. The server can read it only while someone who
+knows the PIN is using it, so a database dump plus the entire application
+configuration still yields nothing — and it survives a restart.
+
+Losing the PIN still means losing the conversation.
+
+### Why one private PIN per person, not per conversation
+
+A per-session PIN cannot survive contact with resumption. Given only a PIN,
+the server cannot tell which conversation was meant, so a wrong guess had to
+count against every private session the user had — five mistyped digits could
+lock out several unrelated conversations at once.
+
+Requiring a session id alongside the PIN was the first attempt at a fix and
+was worse: the id is not a secret, it identifies a row already scoped to the
+caller, and asking a user to keep a UUID safe bought nothing while making the
+feature unusable in practice.
+
+One PIN per person removes the ambiguity. The PIN identifies the *person*; all
+of that person's private sessions are then reachable.
+
+That change forced a second one. Self-destruct after five wrong attempts made
+sense when a PIN guarded one conversation — deleting it only cost an intruder.
+Once a single PIN guards them all, self-destruction hands anyone holding the
+phone a way to erase every private chat in five guesses. It now locks for 15
+minutes instead.
 
 ### Why a hand-written Markdown renderer
 
@@ -458,6 +520,50 @@ keyword. The classifier picked `records` for both, and the merge led with it.
 cheapest / nearest, near a test noun — and drops `records` when `admin` is
 also present. The classifier does not get a vote on this one.
 
+### 13. The illustration that was rendering all along
+
+Reported as "no image in the welcome card". The data was correct, the `<img>`
+was in the DOM, the file returned 200. The asset itself was the bug: framed
+card art with an opaque near-white background, drawn over a near-white
+gradient card.
+
+Cutting it to transparency took three attempts, and the failures are the
+useful part:
+
+1. **Flood fill from the corners** — the rounded frame is a closed stroke, so
+   the fill stopped at it and left the interior untouched.
+2. **Seed deeper to get past the frame** — this silently *destroyed* artwork.
+   Inset seeds landed on white hair and dark trousers and ate the figures from
+   the inside. Nothing in the output looked wrong until every asset was
+   composited over a contrasting colour and inspected.
+3. **Crop the frame off first, then fill from the true border** — no seed ever
+   touches the picture.
+
+The threshold mattered as much as the seeding: the background is
+`(230,238,235)` and the nearest artwork colour is white hair about 36 away, so
+a tolerance of 46 reached past the background into the hair. 24 clears
+compression noise and stops short.
+
+**Lesson:** an image pipeline needs a proof sheet. A batch job that reports
+"cut 72%" tells you nothing about whether it removed the right 72%.
+
+### 14. Encryption silently did nothing
+
+`crypto.py` read its key with `os.getenv("SUWAPATH_ENCRYPTION_KEY")`. The
+project keeps configuration in `.env` loaded by pydantic-settings, which
+populates a `Settings` object and **never exports to the process
+environment**. So the key was always absent, `encrypt()` returned its input
+unchanged by design, and everything appeared to work — messages saved, history
+loaded, tests passed.
+
+It was caught by querying the database directly and reading the raw column,
+which showed plaintext. Now read through `settings`, with `os.getenv` only as
+a fallback.
+
+**Lesson:** verify security features at the layer they claim to protect. An
+encryption feature that is tested through its own API tests nothing — both
+sides of the round trip agree whether or not the key exists.
+
 ### 10. Smaller ones
 
 | Bug | Cause |
@@ -477,7 +583,21 @@ also present. The classifier does not get a vote on this one.
 
 ## What is not done
 
-Honest list, after Phase 6 closed most of the previous one.
+### Known gaps in encryption
+
+- **Only conversation content is encrypted.** `ChatMessage.meta`, report OCR
+  text, and the clinical tables are still plaintext. Conversations were done
+  first because they carry the most volunteered detail, not because the rest
+  is safe.
+- **No key rotation path.** The ciphertext carries a `v1.` version prefix so
+  rotation is possible, but nothing re-encrypts existing rows. Changing
+  `SUWAPATH_ENCRYPTION_KEY` today makes old conversations unreadable.
+- **The key sits in `.env`.** Fine for this deployment, not for production —
+  a KMS or Vault holding the master key, with per-record data keys, is the
+  pattern that gives rotation and an audit trail of every decrypt.
+- **Retention runs opportunistically**, on the same request that purges
+  expired private sessions. A conversation older than 90 days survives until
+  someone opens their history. It wants a scheduled job.
 
 ### Worth doing next
 
@@ -544,6 +664,37 @@ git -c user.name=Oxshadha commit -m "feat(agent): add web search tool"
 - Comments explain *why*, not *what*. The codebase already reads this way;
   match it.
 - Deterministic fallback for every model call. No exceptions.
+
+### Documentation
+
+`README.md` and this log have different readers, and mixing them is the easy
+mistake to make.
+
+**README is written for someone who has just found the project** and wants to
+know what it is, whether it is worth their time, and how to run it. It is
+descriptive, in the present tense, and about the software as it stands:
+
+- Say what a thing *is*, not why a choice was defended. "Private transcripts
+  are encrypted under a PIN-derived key" — not "we thought about this
+  carefully and here is why it is not a weakness."
+- No self-assessment, no scoring, no arguing with an imagined critic.
+  Headings like *"Is X enough?"* or *"What is real and what is not"* are a
+  conversation with a reviewer, not documentation. Use *"How the PHI boundary
+  works"*, *"Implementation status"*.
+- No debugging narrative. "You ran the command from the wrong directory"
+  becomes "Run this from `backend/`." State the fix; skip the diagnosis of the
+  reader.
+- Limitations belong there, stated plainly and once — a *Synthetic data only*
+  section, a placeholder marked in a status table. Plain limits build more
+  trust than paragraphs defending them.
+- Structure follows the convention readers expect: what it does → highlights →
+  architecture → getting started → configuration → API → testing → limitations
+  → troubleshooting. Someone should be able to run it from the README alone.
+
+**This log is for whoever maintains it next.** Reasoning, rejected
+alternatives, bugs and their root causes belong here — the expensive context
+that would otherwise have to be rediscovered. When a README section starts
+explaining *why*, it usually belongs in this file instead.
 
 ### Testing
 
