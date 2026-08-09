@@ -28,6 +28,7 @@ from app.core.security import get_current_user
 from app.models.chat import ChatSession
 from app.models.identity import AuditLog, User
 from app.privacy.boundary import egress_policy_note
+from app.core import crypto
 from app.services import chat_store, memory
 from app.services.ai_orchestrator import orchestrator_status
 
@@ -87,6 +88,9 @@ def list_chat_sessions(
 ) -> dict:
     """Visible conversation history. Private sessions never appear here."""
     chat_store.purge_expired(db)
+    # Retention runs on the same natural trigger as expiry rather than needing
+    # a scheduler: opening your history is the moment stale rows should go.
+    chat_store.purge_old_conversations(db)
     sessions = chat_store.list_sessions(db, current_user.id, limit=limit)
     return {"sessions": [_session_summary(s) for s in sessions]}
 
@@ -132,7 +136,7 @@ def get_chat_session(
         "messages": [
             {
                 "role": m.role,
-                "content": m.content,
+                "content": crypto.decrypt(m.content),
                 "meta": m.meta,
                 "created_at": m.created_at,
             }
@@ -157,6 +161,7 @@ def resume_private_session(
             )
             if session is None or not session.is_private:
                 raise chat_store.ChatError("That private chat is no longer available.")
+            chat_store.unlock_private(db, session, payload.pin)
         else:
             session = chat_store.resume_private_by_pin(
                 db, current_user.id, payload.pin

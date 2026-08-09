@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     # over automatically from the bundled baseline adapter.
     cv_model_dir: Path = REPO_ROOT / "models"
 
+    # --- Encryption ---
+    # Base64 32-byte key for AES-256-GCM over stored conversation content.
+    # Absent in development, which stores plaintext; required in production.
+    suwapath_encryption_key: str = ""
+
     # --- CORS ---
     cors_origins: list[str] = [
         "http://localhost:5173",
