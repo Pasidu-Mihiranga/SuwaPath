@@ -14,6 +14,11 @@ engine = create_engine(
     echo=settings.sql_echo,
     pool_pre_ping=True,
     future=True,
+    # The agent graph fans out to six parallel nodes, each opening its own
+    # short-lived session, and the scheduler adds worker threads on top. The
+    # default 5+10 is exhausted by one busy conversation plus a job tick.
+    pool_size=10,
+    max_overflow=20,
 )
 
 SessionLocal = sessionmaker(

@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     # over automatically from the bundled baseline adapter.
     cv_model_dir: Path = REPO_ROOT / "models"
 
+    # --- Autonomy ---
+    # The background layer that lets the system act without an inbound
+    # request. Off under pytest so tests never race a background writer.
+    agentic_enabled: bool = True
+    scheduler_enabled: bool = True
+    job_tick_seconds: int = 60
+    task_max_attempts: int = 5
+    # Where the patients are. Medication times, quiet hours and daily job
+    # buckets are all local-calendar concepts, not UTC ones.
+    local_timezone: str = "Asia/Colombo"
+
     # --- Encryption ---
     # Base64 32-byte key for AES-256-GCM over stored conversation content.
     # Absent in development, which stores plaintext; required in production.

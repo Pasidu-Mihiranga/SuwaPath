@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.v1 import (
+    actions,
     admin,
     agent,
     appointments,
@@ -53,7 +54,16 @@ async def lifespan(app: FastAPI):
             "deterministic fallbacks — every feature still works, but "
             "conversation wording will be scripted rather than generated."
         )
-    yield
+
+    # The autonomy layer. Everything above this line only ever reacts to a
+    # request; this is the one thing in the process that acts on its own.
+    from app.services.jobs import scheduler as job_scheduler
+
+    job_scheduler.start()
+    try:
+        yield
+    finally:
+        job_scheduler.shutdown()
 
 
 app = FastAPI(
@@ -95,6 +105,7 @@ prefix = settings.api_v1_prefix
 for router in (
     auth.router,
     agent.router,
+    actions.router,
     patients.router,
     symptoms.router,
     media.router,

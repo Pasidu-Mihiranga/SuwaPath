@@ -4,7 +4,13 @@ Importing this package registers every mapper, which `create_all()` relies on.
 """
 
 from app.models.base import Base, TimestampMixin, new_uuid, utcnow
-from app.models.chat import ChatMessage, ChatSession
+from app.models.agentic import ActionProposal, AgentTask, DeliveryAttempt, TaskRun
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    PrivateChatPin,
+    PrivateTranscript,
+)
 from app.models.memory import PatientMemory
 from app.models.care import (
     Appointment,
@@ -59,6 +65,13 @@ from app.models.providers import (
 )
 
 __all__ = [
+    # autonomy
+    "AgentTask",
+    "TaskRun",
+    "ActionProposal",
+    "DeliveryAttempt",
+    "PrivateChatPin",
+    "PrivateTranscript",
     "ChatMessage",
     "PatientMemory",
     "ChatSession",

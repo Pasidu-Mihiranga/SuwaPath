@@ -42,3 +42,6 @@ numpy==2.2.1
 # fighting a hard pin; the OCR and CV adapters work across these versions.
 Pillow>=10.3,<11
 onnxruntime>=1.17,<1.20
+
+# Background scheduler for the autonomy layer (in-process, no broker).
+APScheduler==3.11.2
