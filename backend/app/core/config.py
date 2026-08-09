@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     # Where the patients are. Medication times, quiet hours and daily job
     # buckets are all local-calendar concepts, not UTC ones.
     local_timezone: str = "Asia/Colombo"
+    # SMS delivery. Empty means the no-op provider: the whole delivery path
+    # still runs and records attempts, nothing leaves the machine.
+    sms_provider: str = ""
+    sms_api_key: str = ""
+    sms_sender_id: str = "SuwaPath"
 
     # --- Encryption ---
     # Base64 32-byte key for AES-256-GCM over stored conversation content.
