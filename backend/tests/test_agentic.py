@@ -122,7 +122,12 @@ def main() -> int:
     client = httpx.Client(timeout=60.0)
 
     try:
-        patient = db.query(User).filter(User.email == "patient@suwapath.lk").one()
+        # Deliberately a patient with no other active recommendations. The
+        # detector caps how many follow-ups one person may have open at once,
+        # so a patient already carrying a backlog would have that budget spent
+        # before the fixture was reached — and the suite would report a
+        # failure that was actually the cap working correctly.
+        patient = db.query(User).filter(User.email == "maternal@suwapath.lk").one()
         reset_state(db, patient.id)
         fixture = seed_stalled_recommendation(db, patient.id)
 
@@ -207,9 +212,30 @@ def main() -> int:
         )
         check("Nothing was booked without approval", booked == 0, f"{booked} appointment(s)")
 
+        section("Alert fatigue — a backlog does not become an inbox flood")
+
+        # A patient with a long history has dozens of active recommendations.
+        # Chasing all of them at once is the failure mode that makes proactive
+        # health software get muted, so the detector caps how many follow-ups
+        # one person may have open.
+        busy = db.query(User).filter(User.email == "patient@suwapath.lk").one()
+        open_for_busy = (
+            db.query(ActionProposal)
+            .filter(
+                ActionProposal.subject_user_id == busy.id,
+                ActionProposal.status == "pending",
+            )
+            .count()
+        )
+        check(
+            "A patient with a large backlog is capped",
+            open_for_busy <= referrals.MAX_OPEN_PER_PATIENT,
+            f"{open_for_busy} open (cap {referrals.MAX_OPEN_PER_PATIENT})",
+        )
+
         section("Approval — one tap, and the shared booking path runs")
 
-        token = login(client, "patient@suwapath.lk")
+        token = login(client, "maternal@suwapath.lk")
         headers = {"Authorization": f"Bearer {token}"}
 
         listed = client.get(f"{API}/actions", headers=headers)
@@ -249,7 +275,7 @@ def main() -> int:
 
         section("Authorisation — a stranger cannot approve or even see it")
 
-        other_token = login(client, "maternal@suwapath.lk")
+        other_token = login(client, "patient@suwapath.lk")
         other_headers = {"Authorization": f"Bearer {other_token}"}
         remaining = (
             db.query(ActionProposal)
