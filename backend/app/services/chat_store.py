@@ -18,10 +18,17 @@ in the visible history list either way.
 
 PIN handling
 ------------
+The PIN belongs to the person, not the conversation: one PIN opens every
+private chat they have. A per-session PIN could not survive contact with
+resumption — given only a PIN, the server could not tell which conversation
+was meant, so a wrong guess had to be counted against all of them.
+
 Six digits is a million combinations, which brute-forces instantly if you let
-it. Three defences: PBKDF2 with a per-session salt so a dump does not reveal
-the PIN, a hard attempt cap after which the session self-destructs, and
-constant-time comparison so timing does not leak digits.
+it. Three defences: PBKDF2 with a salt so a dump does not reveal the PIN, an
+attempt cap that locks the PIN for a cool-off period, and constant-time
+comparison so timing does not leak digits. The cap locks rather than deletes —
+now that one PIN guards every private chat, self-destruction would let anyone
+holding the phone erase them all with five wrong guesses.
 """
 
 from __future__ import annotations
@@ -38,14 +45,13 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.chat import ChatMessage, ChatSession
+from app.models.chat import ChatMessage, ChatSession, PrivateChatPin
 
 logger = logging.getLogger(__name__)
 
 # A private session outlives the tab but not the day.
 PRIVATE_TTL_HOURS = 12
-# After this many wrong PINs the session is destroyed rather than locked, so
-# there is nothing left to keep guessing at.
+# Wrong PINs allowed before the private PIN is locked for a cool-off period.
 MAX_PIN_ATTEMPTS = 5
 PIN_PATTERN = re.compile(r"^\d{6}$")
 
@@ -113,6 +119,14 @@ class ChatError(Exception):
     """A chat operation the caller is not permitted to complete."""
 
 
+def _validate_pin(pin: str | None) -> str:
+    if not pin or not PIN_PATTERN.match(pin):
+        raise ChatError("A private chat needs a 6-digit PIN.")
+    if len(set(pin)) == 1 or pin in {"123456", "654321", "012345"}:
+        raise ChatError("Please choose a less predictable PIN.")
+    return pin
+
+
 # --------------------------------------------------------------------------
 # Sessions
 # --------------------------------------------------------------------------
@@ -125,14 +139,20 @@ def create_session(
     private: bool = False,
     pin: str | None = None,
 ) -> ChatSession:
-    """Start a conversation. A private one requires a 6-digit PIN."""
-    if private:
-        if not pin or not PIN_PATTERN.match(pin):
-            raise ChatError("A private chat needs a 6-digit PIN.")
-        if len(set(pin)) == 1 or pin in {"123456", "654321", "012345"}:
-            raise ChatError("Please choose a less predictable PIN.")
+    """Start a conversation.
 
-    salt = secrets.token_hex(16) if private else None
+    A private one is guarded by the person's private PIN. The first private
+    chat sets that PIN; every later one verifies it, so the same PIN opens all
+    of them and no conversation carries a secret of its own.
+    """
+    if private:
+        _validate_pin(pin)
+        assert pin is not None
+        if has_private_pin(db, user_id):
+            verify_private_pin(db, user_id, pin)
+        else:
+            set_private_pin(db, user_id, pin)
+
     session = ChatSession(
         user_id=user_id,
         subject_user_id=subject_user_id,
@@ -141,8 +161,9 @@ def create_session(
         # A private session gets no content-derived title, because the title
         # would leak the subject in exactly the list we promised to stay out of.
         title="Private conversation" if private else "New conversation",
-        pin_hash=hash_pin(pin, salt) if private and pin and salt else None,
-        pin_salt=salt,
+        # The verifier lives on the person now, not the conversation.
+        pin_hash=None,
+        pin_salt=None,
         expires_at=(
             datetime.now(timezone.utc) + timedelta(hours=PRIVATE_TTL_HOURS)
             if private
@@ -163,86 +184,107 @@ def get_session(db: Session, session_id: str, user_id: str) -> ChatSession | Non
     ).scalar_one_or_none()
 
 
-def resume_private(db: Session, session_id: str, user_id: str, pin: str) -> ChatSession:
-    """Reopen a private session. Wrong PINs destroy it rather than lock it."""
-    session = get_session(db, session_id, user_id)
-    if session is None or not session.is_private:
-        raise ChatError("That private chat is no longer available.")
+# --------------------------------------------------------------------------
+# The per-person private PIN
+# --------------------------------------------------------------------------
+# Long enough to make five guesses useless, short enough that a person who
+# simply mistyped is not shut out for the rest of the day.
+PIN_LOCKOUT_MINUTES = 15
 
-    if session.expires_at and session.expires_at < datetime.now(timezone.utc):
-        destroy(db, session)
-        raise ChatError("That private chat has expired and is gone.")
 
-    if verify_pin(session, pin):
-        session.pin_attempts = 0
+def _pin_record(db: Session, user_id: str) -> PrivateChatPin | None:
+    return db.execute(
+        select(PrivateChatPin).where(PrivateChatPin.user_id == user_id)
+    ).scalar_one_or_none()
+
+
+def has_private_pin(db: Session, user_id: str) -> bool:
+    return _pin_record(db, user_id) is not None
+
+
+def set_private_pin(db: Session, user_id: str, pin: str) -> PrivateChatPin:
+    """Register the PIN that will guard every private chat for this person."""
+    _validate_pin(pin)
+    salt = secrets.token_hex(16)
+    record = _pin_record(db, user_id)
+    if record is None:
+        record = PrivateChatPin(user_id=user_id)
+        db.add(record)
+    record.pin_hash = hash_pin(pin, salt)
+    record.pin_salt = salt
+    record.attempts = 0
+    record.locked_until = None
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def verify_private_pin(db: Session, user_id: str, pin: str) -> None:
+    """Check the person's PIN, or raise ChatError explaining why not.
+
+    Nothing is deleted on failure. The PIN now guards every private chat at
+    once, so destroying them after five wrong guesses would turn a lockout
+    into a way for anyone holding the phone to erase the lot.
+    """
+    record = _pin_record(db, user_id)
+    if record is None:
+        raise ChatError("No private PIN has been set yet.")
+
+    now = datetime.now(timezone.utc)
+    if record.locked_until and record.locked_until > now:
+        wait = int((record.locked_until - now).total_seconds() // 60) + 1
+        raise ChatError(f"Too many attempts. Try again in {wait} minute(s).")
+
+    if hmac.compare_digest(record.pin_hash, hash_pin(pin, record.pin_salt)):
+        record.attempts = 0
+        record.locked_until = None
         db.commit()
-        return session
+        return
 
-    session.pin_attempts += 1
-    remaining = MAX_PIN_ATTEMPTS - session.pin_attempts
+    record.attempts += 1
+    remaining = MAX_PIN_ATTEMPTS - record.attempts
     if remaining <= 0:
-        destroy(db, session)
+        record.attempts = 0
+        record.locked_until = now + timedelta(minutes=PIN_LOCKOUT_MINUTES)
+        db.commit()
         raise ChatError(
-            "Too many incorrect PINs — the conversation has been deleted."
+            f"Too many attempts. Private chat is locked for "
+            f"{PIN_LOCKOUT_MINUTES} minutes."
         )
     db.commit()
     raise ChatError(f"Incorrect PIN. {remaining} attempt(s) left.")
 
 
-def resume_private_by_pin(db: Session, user_id: str, pin: str) -> ChatSession:
-    """Reopen a private session knowing only its PIN.
-
-    Requiring a session id as well was a UI failure dressed up as security. The
-    id is not a secret — it identifies the row, and it is already scoped to the
-    caller's own account, so asking the user to keep a UUID safe bought nothing
-    and made the feature unusable in practice.
-
-    The search is over the caller's own live private sessions only, so the PIN
-    is never tested against anyone else's conversation. In the ordinary case
-    there is exactly one.
-
-    A wrong PIN counts against every candidate, because the server genuinely
-    cannot tell which one was meant. With a single private chat — the normal
-    situation — that is identical to the old behaviour.
-    """
+def live_private_sessions(db: Session, user_id: str) -> list[ChatSession]:
+    """The person's private sessions that have not expired, newest first."""
     now = datetime.now(timezone.utc)
-    candidates = list(
-        db.execute(
-            select(ChatSession).where(
-                ChatSession.user_id == user_id,
-                ChatSession.is_private.is_(True),
-            )
-        ).scalars()
-    )
-
     live: list[ChatSession] = []
-    for session in candidates:
+    for session in db.execute(
+        select(ChatSession).where(
+            ChatSession.user_id == user_id,
+            ChatSession.is_private.is_(True),
+        )
+    ).scalars():
         if session.expires_at and session.expires_at < now:
             destroy(db, session)
         else:
             live.append(session)
+    live.sort(key=lambda s: s.created_at, reverse=True)
+    return live
 
+
+def resume_private_by_pin(db: Session, user_id: str, pin: str) -> ChatSession:
+    """Reopen the most recent private chat using the person's PIN.
+
+    The PIN identifies the person, not the conversation, so there is no
+    guessing about which session was meant and no collateral damage to the
+    others — the problem that made the per-session PIN unworkable.
+    """
+    verify_private_pin(db, user_id, pin)
+    live = live_private_sessions(db, user_id)
     if not live:
         raise ChatError("There is no private chat to reopen.")
-
-    for session in live:
-        if verify_pin(session, pin):
-            session.pin_attempts = 0
-            db.commit()
-            return session
-
-    lowest_remaining = MAX_PIN_ATTEMPTS
-    for session in live:
-        session.pin_attempts += 1
-        remaining = MAX_PIN_ATTEMPTS - session.pin_attempts
-        lowest_remaining = min(lowest_remaining, remaining)
-        if remaining <= 0:
-            destroy(db, session)
-    db.commit()
-
-    if lowest_remaining <= 0:
-        raise ChatError("Too many incorrect PINs — the conversation has been deleted.")
-    raise ChatError(f"Incorrect PIN. {lowest_remaining} attempt(s) left.")
+    return live[0]
 
 
 def destroy(db: Session, session: ChatSession) -> None:

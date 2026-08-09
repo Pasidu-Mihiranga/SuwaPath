@@ -149,9 +149,14 @@ def resume_private_session(
 ) -> dict:
     try:
         if payload.session_id:
-            session = chat_store.resume_private(
-                db, payload.session_id, current_user.id, payload.pin
+            # A specific conversation was named; the PIN still has to be the
+            # person's own, and the session still has to belong to them.
+            chat_store.verify_private_pin(db, current_user.id, payload.pin)
+            session = chat_store.get_session(
+                db, payload.session_id, current_user.id
             )
+            if session is None or not session.is_private:
+                raise chat_store.ChatError("That private chat is no longer available.")
         else:
             session = chat_store.resume_private_by_pin(
                 db, current_user.id, payload.pin
