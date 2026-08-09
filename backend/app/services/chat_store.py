@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import json
 import re
 import secrets
 import threading
@@ -45,7 +46,13 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.chat import ChatMessage, ChatSession, PrivateChatPin
+from app.core import crypto
+from app.models.chat import (
+    ChatMessage,
+    ChatSession,
+    PrivateChatPin,
+    PrivateTranscript,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +73,30 @@ HISTORY_TURNS = 12
 # Private transcripts — process memory only
 # --------------------------------------------------------------------------
 class _PrivateBuffer:
-    """In-memory transcripts for private sessions. Never touches disk."""
+    """Open private transcripts, held in memory only while in use.
+
+    This is a cache of sessions someone has unlocked in this process, not the
+    system of record — that is `private_transcripts`, encrypted under a key
+    derived from the PIN. Holding the derived key here is what lets the rest
+    of a conversation continue without asking for the PIN on every turn; it
+    is dropped when the session ends or expires, and it is never written down.
+    """
 
     def __init__(self) -> None:
         self._data: dict[str, list[dict]] = {}
+        self._keys: dict[str, bytes] = {}
         self._touched: dict[str, float] = {}
         self._lock = threading.Lock()
+
+    def unlock(self, session_id: str, key: bytes, turns: list[dict]) -> None:
+        with self._lock:
+            self._keys[session_id] = key
+            self._data[session_id] = list(turns)
+            self._touched[session_id] = time.monotonic()
+
+    def key(self, session_id: str) -> bytes | None:
+        with self._lock:
+            return self._keys.get(session_id)
 
     def append(self, session_id: str, role: str, content: str) -> None:
         with self._lock:
@@ -88,12 +113,14 @@ class _PrivateBuffer:
     def drop(self, session_id: str) -> None:
         with self._lock:
             self._data.pop(session_id, None)
+            self._keys.pop(session_id, None)
             self._touched.pop(session_id, None)
 
     def _evict(self) -> None:
         cutoff = time.monotonic() - PRIVATE_TTL_HOURS * 3600
         for key in [k for k, t in self._touched.items() if t < cutoff]:
             self._data.pop(key, None)
+            self._keys.pop(key, None)
             self._touched.pop(key, None)
 
 
@@ -161,9 +188,11 @@ def create_session(
         # A private session gets no content-derived title, because the title
         # would leak the subject in exactly the list we promised to stay out of.
         title="Private conversation" if private else "New conversation",
-        # The verifier lives on the person now, not the conversation.
+        # The PIN verifier lives on the person now. This salt is a different
+        # thing: it makes each session's transcript key distinct, so one
+        # decrypted conversation does not unlock the others.
         pin_hash=None,
-        pin_salt=None,
+        pin_salt=secrets.token_hex(16) if private else None,
         expires_at=(
             datetime.now(timezone.utc) + timedelta(hours=PRIVATE_TTL_HOURS)
             if private
@@ -173,6 +202,12 @@ def create_session(
     db.add(session)
     db.commit()
     db.refresh(session)
+    if private and pin:
+        # Derive and hold the transcript key now, so the conversation can be
+        # written without asking for the PIN again on every turn.
+        private_buffer.unlock(
+            session.id, crypto.derive_key(pin, session.pin_salt or session.id), []
+        )
     return session
 
 
@@ -284,7 +319,9 @@ def resume_private_by_pin(db: Session, user_id: str, pin: str) -> ChatSession:
     live = live_private_sessions(db, user_id)
     if not live:
         raise ChatError("There is no private chat to reopen.")
-    return live[0]
+    session = live[0]
+    unlock_private(db, session, pin)
+    return session
 
 
 def destroy(db: Session, session: ChatSession) -> None:
@@ -310,6 +347,46 @@ def list_sessions(db: Session, user_id: str, *, limit: int = 40) -> list[ChatSes
     )
 
 
+def _persist_private(db: Session, session: ChatSession) -> None:
+    """Write the open transcript back, encrypted under its PIN-derived key."""
+    key = private_buffer.key(session.id)
+    if key is None:
+        # No key in this process: the session was never unlocked here, so
+        # there is nothing to write and nothing that could be written safely.
+        return
+    blob = crypto.encrypt_with_pin_key(
+        key, json.dumps(private_buffer.read(session.id))
+    )
+    row = db.get(PrivateTranscript, session.id)
+    if row is None:
+        db.add(PrivateTranscript(session_id=session.id, ciphertext=blob))
+    else:
+        row.ciphertext = blob
+
+
+def unlock_private(db: Session, session: ChatSession, pin: str) -> list[dict]:
+    """Decrypt a private transcript into this process and return its turns.
+
+    A wrong PIN cannot get here — the caller verifies it first — but a key
+    that does not match the stored ciphertext still has to be handled, because
+    a PIN that was changed after the transcript was written would produce
+    exactly that.
+    """
+    key = crypto.derive_key(pin, session.pin_salt or session.id)
+    row = db.get(PrivateTranscript, session.id)
+    turns: list[dict] = []
+    if row is not None:
+        try:
+            turns = json.loads(crypto.decrypt_with_pin_key(key, row.ciphertext))
+        except (crypto.DecryptionError, ValueError):
+            logger.warning(
+                "Private transcript for %s could not be decrypted.", session.id
+            )
+            turns = []
+    private_buffer.unlock(session.id, key, turns)
+    return turns
+
+
 def load_history(db: Session, session: ChatSession) -> list[dict]:
     """Prior turns for the graph, newest-last, capped."""
     if session.is_private:
@@ -321,7 +398,10 @@ def load_history(db: Session, session: ChatSession) -> list[dict]:
         .order_by(ChatMessage.created_at.desc())
         .limit(HISTORY_TURNS)
     ).scalars()
-    return [{"role": r.role, "content": r.content} for r in reversed(list(rows))]
+    return [
+        {"role": r.role, "content": crypto.decrypt(r.content)}
+        for r in reversed(list(rows))
+    ]
 
 
 def append(
@@ -339,12 +419,16 @@ def append(
     """
     if session.is_private:
         private_buffer.append(session.id, role, content)
+        _persist_private(db, session)
     else:
         db.add(
             ChatMessage(
                 session_id=session.id,
                 role=role,
-                content=content,
+                # Encrypted with the server key. Reads go through
+                # crypto.decrypt, which also passes through older plaintext
+                # rows so switching this on did not need a migration.
+                content=crypto.encrypt(content),
                 meta=meta or {},
             )
         )
@@ -369,6 +453,30 @@ def _title_from(text: str) -> str:
     if len(cleaned) <= 60:
         return cleaned or "New conversation"
     return cleaned[:60].rsplit(" ", 1)[0] + "…"
+
+
+# Ordinary conversations are kept for a bounded time rather than forever.
+# Indefinite retention of clinical conversation is a liability that grows on
+# its own; ninety days covers "resume the thing I was doing last month".
+NORMAL_RETENTION_DAYS = 90
+
+
+def purge_old_conversations(db: Session) -> int:
+    """Delete ordinary conversations past the retention window."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=NORMAL_RETENTION_DAYS)
+    stale = list(
+        db.execute(
+            select(ChatSession).where(
+                ChatSession.is_private.is_(False),
+                ChatSession.created_at < cutoff,
+            )
+        ).scalars()
+    )
+    for session in stale:
+        db.delete(session)
+    if stale:
+        db.commit()
+    return len(stale)
 
 
 def purge_expired(db: Session) -> int:

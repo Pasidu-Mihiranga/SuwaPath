@@ -130,3 +130,30 @@ class PrivateChatPin(Base, TimestampMixin):
     pin_salt: Mapped[str] = mapped_column(String(64))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PrivateTranscript(Base, TimestampMixin):
+    """A private conversation, encrypted with a key derived from the PIN.
+
+    Private transcripts used to live only in process memory, which kept them
+    off disk but made the promise of resumption hollow: a restart, a deploy,
+    or simply a second worker answering the request lost the conversation.
+
+    Storing them encrypted under a PIN-derived key keeps the privacy property
+    that mattered — the server cannot read this without the PIN, so a database
+    dump and the full application configuration together still yield nothing —
+    while making resumption actually work.
+
+    One row per session holds the whole transcript as a single encrypted JSON
+    document. Per-message rows would leak the shape of the conversation (how
+    many turns, how long, when) in the clear.
+    """
+
+    __tablename__ = "private_transcripts"
+
+    session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    ciphertext: Mapped[str] = mapped_column(Text)
