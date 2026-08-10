@@ -93,6 +93,16 @@ class Appointment(Base, TimestampMixin):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancellation_reason: Mapped[str | None] = mapped_column(Text)
 
+    # Who decided the current status.
+    #
+    # "human" for anything a person recorded; "auto_sweep" when the system
+    # marked an elapsed appointment as missed because nobody closed it. The
+    # distinction is load-bearing for the no-show model: a swept row means
+    # "nobody updated this", which is not evidence the patient failed to
+    # attend, and training on it teaches the model to predict administrative
+    # neglect instead of absence.
+    status_source: Mapped[str] = mapped_column(String(16), default="human")
+
     reschedule_count: Mapped[int] = mapped_column(Integer, default=0)
     reminder_sent_count: Mapped[int] = mapped_column(Integer, default=0)
     patient_distance_km: Mapped[float | None] = mapped_column(Float)

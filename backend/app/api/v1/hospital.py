@@ -176,6 +176,32 @@ def no_show(
     return no_show_summary(db, hospital_id=scope)
 
 
+@router.get("/model-quality")
+def model_quality(
+    hospital_id: str | None = None,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Is the no-show model any good?
+
+    Until now nothing in the system could answer that. The model was fitted,
+    scored, banded and rendered, and no line of code ever compared a
+    prediction against what happened. A risk percentage on a dashboard with no
+    accuracy behind it is a number, not evidence.
+
+    Two views, because they answer different questions: a clean time-split
+    backtest says whether the approach works, and grading the predictions the
+    system actually stored says whether the deployed model is still working.
+    """
+    from app.services.ml.backtest import backtest_no_show, score_deployed_predictions
+
+    scope = _scope(current_user, hospital_id)
+    return {
+        "backtest": backtest_no_show(db, hospital_id=scope),
+        "deployed": score_deployed_predictions(db, hospital_id=scope),
+    }
+
+
 @router.post("/no-show/refresh")
 def refresh_no_show(
     hospital_id: str | None = None,
