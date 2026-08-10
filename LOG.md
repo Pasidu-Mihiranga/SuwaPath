@@ -205,6 +205,27 @@ incremented), `missed_checkin_alert_threshold` (read by no code at all), and
 **Current state:** `test_scenarios.py` 73/73, `test_agentic.py` 23/23, `tsc
 --noEmit` and `vite build` clean.
 
+### Phase 9 — closing the four criticisms (2026-08-10)
+
+The project had been criticised as "just a chatbot with no innovation". Four
+gaps were named; this phase closed them.
+
+- **The agent could not reason.** `fulfil_node` was one forward pass with a
+  hard-coded pair of handoffs. Replaced by a bounded plan-act-observe loop
+  (`app/agent/react.py`) and a judge that can ask for one rewrite.
+- **Only patients had autonomous behaviour.** Doctors, guardians, hospital
+  administrators and system administrators now all originate work, not just
+  receive it. Four new detectors and three new actions.
+- **The ML was decorative.** `app/services/ml/` measures it: AUC, PR-AUC,
+  Brier, ECE and a calibration table, on a held-out time split, surfaced on
+  the hospital dashboard.
+- **No trained CV model.** Training was launched on Kaggle; the export
+  pipeline, threshold sidecar and adapter fixes landed ahead of the weights.
+
+**Current state:** `test_scenarios.py` 73/73, `test_agentic.py` 23/23,
+`test_react.py` 23/23, `test_roles.py` 15/15, `test_coverage.py` 11/11,
+`test_enums.py` clean.
+
 ---
 
 ## Architecture as it stands
@@ -408,6 +429,55 @@ private chat, self-destruct hands anyone holding the phone a way to erase all
 of them. Once one detector watches every recommendation, unbounded nudging
 hands the system a way to make itself ignored. In each case the aggressive
 behaviour was safe only while the blast radius was one item.
+
+### Why the planner sees outcomes but not contents
+
+The obvious design for a ReAct scratchpad is to accumulate what each tool
+returned and hand the lot to the planner. That would have broken the PHI
+boundary in a way no reviewer would have spotted until it mattered.
+
+`ROUTE_FIELDS` minimises fields *per route*, and `web` — the one route whose
+payload leaves the infrastructure permanently — has the tightest allowlist in
+the file. A scratchpad holding record values, passed to a planner that later
+chooses a web search, crosses that boundary silently.
+
+So the planner receives `{"tool": "records", "status": "ok", "n_results": 3}`
+and nothing else. Planning genuinely does not need the contents — it needs to
+know whether the last lookup found anything. Content is read exactly once, by
+synthesis, under a single route's allowlist.
+
+The property this buys is worth stating precisely: the leak is not *forbidden*,
+it is *impossible*, because the data never enters the prompt. A test asserts
+it by putting a recognisable value in a fake record and checking it cannot be
+found anywhere in what the planner was shown.
+
+### Why the loop only runs after a conclusion
+
+The first version ran on every message and thrashed — four knowledge lookups
+on a turn that needed none, each with slightly different wording so the
+repeat detector never fired.
+
+The gate that fixes it is the same one the old single hop had: the loop exists
+to *fulfil*, to turn a conclusion into something actionable. With no
+conclusion there is nothing to fulfil, and running anyway costs a planner call
+plus several lookups on every turn for no gain. Adding one-line descriptions
+of what each tool does fixed the rest of the aimlessness.
+
+### Why a swept no-show is not a label
+
+The sweep that marks elapsed appointments as missed was added to supply the
+no-show model with the label nobody produces. Measurement showed it does the
+opposite.
+
+A swept row means "nobody closed this appointment", not "the patient did not
+attend". In a demo where no check-in flow ever marks anything complete, that
+is almost every appointment. The first run of the deployed-model grader
+returned AUC `None` — every scored prediction had resolved to `no_show` — and
+both arms of the reminder experiment showed a 100% no-show rate.
+
+`Appointment.status_source` now records who decided, and every label set
+excludes `auto_sweep`. The grader's honest answer today is "no resolved
+predictions yet", which is correct and more useful than a fabricated number.
 
 ### Why a hand-written Markdown renderer
 
@@ -699,6 +769,50 @@ Fixed by seeding onto a patient with no competing recommendations, and by
 adding an explicit assertion that a patient with a large backlog stays capped,
 so the behaviour that caused the confusion is now the thing under test.
 
+### 18. I shipped an infinite loop into the graph
+
+Adding a `judge -> revise -> judge` cycle produced `GraphRecursionError` on
+the very first request. The terminal branch of `judge_node` did not clear
+`judge_constraints`, and the conditional edge fires on that field being set —
+so after the rewrite it went straight back to `revise`, for ever.
+
+Caught by the first end-to-end call returning an empty answer, **not by a
+test**, which is the same way the three undefined enum references got through.
+`tests/test_react.py` now drives the cycle with a judge that is never
+satisfied and no model provider — the case where the rewrite cannot possibly
+help — and asserts it terminates, rewrites exactly once, and never takes the
+edge on a block. Reintroducing the bug turns the suite red.
+
+**Lesson:** a fix without a test is the same bug waiting for the next person.
+
+### 19. The high-risk band was mathematically unreachable
+
+`_band` set "high" at `max(0.35, 2 x base_rate)`. At the seeded base rate of
+0.23 that is 0.455, while the highest probability the model produces is 0.357.
+The hospital dashboard's high-risk table was therefore **permanently empty**,
+and a detector selecting on that band would never have fired.
+
+The function's own docstring warns about this failure mode — "at a 27% base
+rate a 0.45 cut-off leaves the high bucket permanently empty" — two lines
+above the code that causes it. The rule was written to survive a shifting base
+rate and was never checked against a weak model.
+
+Bands now come from the distribution the model actually produces (top decile,
+top third) with a floor at the base rate. Ranking is also the question an
+administrator is really asking: not "who is above 0.455" but "who is most
+worth a call tomorrow".
+
+### 20. A guardian ranking that only ever ranked noise
+
+The first cross-dependent risk score weighted each unacknowledged alert at
+4.0. A dependent with forty of them scored 164, and every other signal — a
+run of missed doses, a reported warning sign — was invisible beside it. The
+ranking would have shown the noisiest dependent first, permanently.
+
+Each component is now capped, so volume cannot swamp severity. Worth noticing
+that the flaw was only visible because the demo data had accumulated real
+alerts from the detectors; on a clean database it would have looked fine.
+
 ### 10. Smaller ones
 
 | Bug | Cause |
@@ -719,6 +833,22 @@ so the behaviour that caused the confusion is now the thing under test.
 ## What is not done
 
 ### Known gaps in the autonomy layer
+
+*Updated 2026-08-10. The ReAct loop, multi-role autonomy and model evaluation
+listed here previously are now built; what follows is what is still open.*
+
+- **No evaluation harness for the autonomy layer itself.** Model quality is
+  measured; agent behaviour is not. Task success rate, action precision,
+  false-alert rate and time-to-detection would need scenario fixtures and an
+  ablation switch. The expensive part — the virtual clock — already exists.
+- **The acceptance classifier is unbuilt.** `ActionProposal.features` is
+  written at propose time specifically so it can be trained later without
+  reconstructing features against changed data.
+- **`Forecast` still has no reader.** `NoShowPrediction` now has three; the
+  demand forecast is still write-only, and its 80% interval has never been
+  validated against what happened.
+- **No impression log for the matcher**, so its hand-tuned weights still
+  cannot be learned.
 
 - **The scheduler lives in the API process** and dies with it. Fine for one
   machine; `app/worker.py` is the documented path to a second process, and the
@@ -868,6 +998,10 @@ PYTHONPATH=. .venv/bin/uvicorn app.main:app --port 8000   # in one shell
 PYTHONPATH=. .venv/bin/python tests/test_scenarios.py     # 73 checks
 PYTHONPATH=. .venv/bin/python tests/test_agent.py         # 19 checks
 PYTHONPATH=. .venv/bin/python tests/test_agentic.py       # 23 checks
+PYTHONPATH=. .venv/bin/python tests/test_react.py         # 23 checks, no server
+PYTHONPATH=. .venv/bin/python tests/test_roles.py         # 15 checks
+PYTHONPATH=. .venv/bin/python tests/test_coverage.py      # 11 checks
+PYTHONPATH=. .venv/bin/python tests/test_enums.py         # static, no server
 ```
 
 `test_agent.py` asserts *properties* — consent enforcement, guardrail
