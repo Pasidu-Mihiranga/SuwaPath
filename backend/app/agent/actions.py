@@ -243,6 +243,60 @@ def book_appointment(
     }
 
 
+@register(
+    "send_followup_recall",
+    tier="T1",
+    summary="Ask patients to book the follow-up you requested",
+    permission=GuardianPermissionType.APPOINTMENTS,
+)
+def send_followup_recall(
+    db: Session,
+    *,
+    actor: User,
+    consultation_ids: list[str] | None = None,
+    **_: Any,
+) -> dict[str, Any]:
+    """A doctor's recall, sent to each patient whose follow-up lapsed.
+
+    The message carries no clinical content — not the reason for the
+    follow-up, not the finding that prompted it. It says a named doctor would
+    like to see them and where to book. Everything else is behind the login,
+    which is the same rule the SMS channel follows and for the same reason: a
+    notification preview is read by whoever is holding the phone.
+    """
+    from app.models.care import Consultation
+    from app.services.delivery import Message, deliver
+
+    sent = 0
+    for consultation_id in consultation_ids or []:
+        consultation = db.get(Consultation, consultation_id)
+        if consultation is None or not consultation.follow_up_required:
+            continue
+        patient = db.get(User, consultation.patient_user_id)
+        if patient is None:
+            continue
+
+        deliver(
+            db,
+            patient,
+            Message(
+                title="Your doctor would like to see you",
+                body=(
+                    f"{actor.full_name} has asked you to book a follow-up "
+                    "appointment. You can book it in SuwaPath."
+                ),
+                priority=str(NotificationPriority.HIGH),
+                category=str(NotificationCategory.FOLLOW_UP),
+                action_type="consultation",
+                action_id=consultation.id,
+            ),
+        )
+        sent += 1
+
+    db.flush()
+    return {"recalls_sent": sent}
+
+
 # --------------------------------------------------------------------------
 # T1 — operational, no patient
 # --------------------------------------------------------------------------
