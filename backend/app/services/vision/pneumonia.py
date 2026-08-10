@@ -20,7 +20,9 @@ Two adapters share one interface:
 
 from __future__ import annotations
 
+import json
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -43,7 +45,47 @@ PNEUMONIA_SPECIALTY = "respiratory_medicine"
 PNEUMONIA_CAPABILITIES = ["chest_xray", "respiratory", "laboratory"]
 
 # Below this margin between classes the result is reported as uncertain.
+#
+# Only meaningful when the decision threshold is 0.5, which is the untrained
+# baseline's operating point. A trained screening model is tuned for
+# sensitivity and sits far lower — the BioFusion runs land around 0.165 — and
+# a fixed +/- 0.20 window around 0.5 is then nonsense: it would call every
+# probability between 0.165 and 0.40 "normal" while flagging almost everything
+# else "uncertain". Adapters carrying a tuned threshold supply their own band
+# in log-odds instead. See `uncertainty_band`.
 UNCERTAINTY_MARGIN = 0.20
+
+# Width of the uncertainty band, in log-odds distance from the operating
+# point. 0.7 is roughly an odds ratio of two either side — near enough to the
+# boundary that a clinician should look rather than trust the label.
+#
+# Log-odds rather than a probability margin because probability space is
+# compressed near the extremes: +/- 0.2 around 0.5 spans a sensible range,
+# while +/- 0.2 around 0.165 reaches below zero on one side and covers a
+# doubling of risk on the other.
+LOGIT_BAND = 0.7
+
+
+def uncertainty_band(threshold: float, width: float = LOGIT_BAND) -> tuple[float, float]:
+    """Probability bounds `width` log-odds either side of `threshold`."""
+    threshold = min(max(threshold, 1e-6), 1 - 1e-6)
+    centre = math.log(threshold / (1 - threshold))
+    lo, hi = centre - width, centre + width
+    return (1 / (1 + math.exp(-lo)), 1 / (1 + math.exp(-hi)))
+
+
+def boundary_confidence(probability: float, threshold: float) -> float:
+    """How far from the decision boundary, scaled to 0.5-1.0.
+
+    `max(p, 1-p)` was reporting 0.8 for a firm positive and 0.9 for a marginal
+    one once the threshold moved off 0.5, which is worse than no number at
+    all. Distance from the boundary is what a reader actually wants.
+    """
+    if probability >= threshold:
+        span = max(1.0 - threshold, 1e-6)
+        return 0.5 + 0.5 * min((probability - threshold) / span, 1.0)
+    span = max(threshold, 1e-6)
+    return 0.5 + 0.5 * min((threshold - probability) / span, 1.0)
 
 
 def _validate_chest_xray(image: np.ndarray) -> ValidationResult:
@@ -132,25 +174,35 @@ def _build_result(
     heatmap_path: Path | None,
     score_fn,
     started: float,
+    score_batch_fn=None,
 ) -> InferenceResult:
     prob_normal = 1.0 - prob_pneumonia
-    margin = abs(prob_pneumonia - prob_normal)
-    uncertain = margin < UNCERTAINTY_MARGIN
+
+    # The operating point comes from the adapter, which reads it from the
+    # sidecar shipped beside the weights. Without one it stays at 0.5 with the
+    # old symmetric margin, so the baseline behaves exactly as before.
+    threshold = getattr(adapter, "decision_threshold", 0.5)
+    band = getattr(adapter, "uncertainty_bounds", None)
+    if band is None:
+        band = (0.5 - UNCERTAINTY_MARGIN / 2, 0.5 + UNCERTAINTY_MARGIN / 2)
+
+    lower, upper = band
+    uncertain = lower <= prob_pneumonia <= upper
 
     if uncertain:
         label = "uncertain"
-        confidence = max(prob_pneumonia, prob_normal)
-    elif prob_pneumonia > prob_normal:
+    elif prob_pneumonia >= threshold:
         label = "pneumonia"
-        confidence = prob_pneumonia
     else:
         label = "normal"
-        confidence = prob_normal
+    confidence = boundary_confidence(prob_pneumonia, threshold)
 
     written_heatmap: str | None = None
     if heatmap_path is not None and adapter.supports_heatmap:
         try:
-            saliency = occlusion_saliency(image, score_fn, grid=8)
+            saliency = occlusion_saliency(
+                image, score_fn, grid=8, score_batch_fn=score_batch_fn
+            )
             written_heatmap = write_heatmap(image, saliency, heatmap_path)
         except Exception as exc:  # noqa: BLE001 - a heatmap is never critical
             logger.warning("Heatmap generation failed: %s", exc)
@@ -216,6 +268,67 @@ class OnnxPneumoniaAdapter(ModelAdapter):
         candidates = sorted(directory.glob("*.onnx"))
         return candidates[0] if candidates else None
 
+    def _load_sidecar(self, model_path: Path) -> None:
+        """Read the operating point shipped beside the weights.
+
+        A threshold is a property of a *trained model*, not of this code: the
+        same architecture tuned for 97% sensitivity lands near 0.165 on one
+        dataset and 0.37 on another. Hardcoding any of them would be wrong for
+        every model but one, so it travels with the weights.
+
+        Missing or malformed sidecar leaves the neutral 0.5 default in place,
+        which is what `models/pneumonia/README.md` already promises for a bare
+        `.onnx`, and `describe()` reports `sidecar_present: false` so the gap
+        is visible rather than silent.
+        """
+        sidecar = model_path.with_suffix(".json")
+        if not sidecar.is_file():
+            logger.warning(
+                "No sidecar beside %s — scoring at the default 0.5 threshold.",
+                model_path.name,
+            )
+            return
+
+        try:
+            meta = json.loads(sidecar.read_text())
+        except (OSError, ValueError):
+            logger.exception("Could not read %s; using default threshold.", sidecar.name)
+            return
+
+        point = meta.get("operating_point") or {}
+        threshold = point.get("threshold")
+        if isinstance(threshold, (int, float)) and 0.0 < float(threshold) < 1.0:
+            self.decision_threshold = float(threshold)
+        else:
+            logger.warning("Sidecar %s has no usable threshold.", sidecar.name)
+
+        band = meta.get("uncertainty_band") or {}
+        lower, upper = band.get("lower"), band.get("upper")
+        if isinstance(lower, (int, float)) and isinstance(upper, (int, float)):
+            self.uncertainty_bounds = (float(lower), float(upper))
+        else:
+            self.uncertainty_bounds = uncertainty_band(self.decision_threshold)
+
+        if meta.get("model_version"):
+            self.model_version = str(meta["model_version"])
+
+        self.operating_point = {
+            "threshold": self.decision_threshold,
+            "policy": point.get("policy"),
+            "min_recall_target": point.get("min_recall_target"),
+            "tta": point.get("tta"),
+            "uncertainty_band": list(self.uncertainty_bounds),
+            "trained_on": (meta.get("training") or {}).get("dataset"),
+            "trained_at": (meta.get("training") or {}).get("trained_at"),
+            "test_metrics": meta.get("test_metrics"),
+        }
+        logger.info(
+            "Loaded operating point from %s: threshold %.3f, band %.3f-%.3f",
+            sidecar.name,
+            self.decision_threshold,
+            *self.uncertainty_bounds,
+        )
+
     def _ensure_loaded(self) -> bool:
         if self._loaded:
             return True
@@ -233,6 +346,7 @@ class OnnxPneumoniaAdapter(ModelAdapter):
             self._session = ort.InferenceSession(
                 str(path), providers=["CPUExecutionProvider"]
             )
+            self._load_sidecar(path)
             spec = self._session.get_inputs()[0]
             self._input_name = spec.name
             shape = spec.shape
@@ -272,8 +386,8 @@ class OnnxPneumoniaAdapter(ModelAdapter):
     def validate(self, image: np.ndarray) -> ValidationResult:
         return _validate_chest_xray(image)
 
-    def _score(self, image: np.ndarray) -> float:
-        """Positive-class (pneumonia) probability for a grayscale image."""
+    def _to_tensor(self, image: np.ndarray) -> np.ndarray:
+        """One grayscale image to the layout this graph declared."""
         from PIL import Image as PILImage
 
         resized = np.asarray(
@@ -290,10 +404,25 @@ class OnnxPneumoniaAdapter(ModelAdapter):
 
         if self._layout == "NHWC":
             tensor = np.transpose(tensor, (1, 2, 0))
-        batch = tensor[None, ...].astype(np.float32)
+        return tensor.astype(np.float32)
 
-        outputs = self._session.run(None, {self._input_name: batch})
-        return _to_positive_probability(np.asarray(outputs[0]).reshape(-1))
+    def _score(self, image: np.ndarray) -> float:
+        """Positive-class (pneumonia) probability for a grayscale image."""
+        return self._score_batch([image])[0]
+
+    def _score_batch(self, images: list[np.ndarray]) -> list[float]:
+        """Score many images in one call.
+
+        Occlusion saliency needs 65 scores for a single heatmap. One call
+        instead of 65 is the difference between a heatmap taking a couple of
+        seconds and taking a few tens of milliseconds, which is why the export
+        keeps a dynamic batch axis.
+        """
+        batch = np.stack([self._to_tensor(image) for image in images], axis=0)
+        outputs = np.asarray(self._session.run(None, {self._input_name: batch})[0])
+        if outputs.ndim == 1:
+            outputs = outputs.reshape(len(images), -1)
+        return [_to_positive_probability(row.reshape(-1)) for row in outputs]
 
     def predict(
         self, image: np.ndarray, *, heatmap_path: Path | None = None
@@ -307,6 +436,7 @@ class OnnxPneumoniaAdapter(ModelAdapter):
             image=image,
             heatmap_path=heatmap_path,
             score_fn=self._score,
+            score_batch_fn=getattr(self, "_score_batch", None),
             started=started,
         )
 
@@ -426,5 +556,6 @@ class BaselinePneumoniaAdapter(ModelAdapter):
             image=image,
             heatmap_path=heatmap_path,
             score_fn=self._score,
+            score_batch_fn=getattr(self, "_score_batch", None),
             started=started,
         )
