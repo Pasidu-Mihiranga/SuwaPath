@@ -39,6 +39,7 @@ from app.agent.guardrails import (
     judge_summary,
 )
 from app.agent.state import ROUTE_ALIASES, MAX_ROUTES, VALID_ROUTES, AgentState
+from app.agent.react import run_loop
 from app.agent.tools import ROUTE_TOOLS, TOOLS, ToolDenied
 from app.privacy.boundary import PHIBoundary, EgressBlocked
 from app.services import ai_orchestrator as ai
@@ -771,115 +772,106 @@ def merge_node(state: AgentState) -> dict:
 
 
 def fulfil_node(state: AgentState) -> dict:
-    """One bounded hop of agent-to-agent handoff.
+    """Bounded reason-act-observe after the parallel agents merge.
 
-    Why this exists
-    ---------------
     Fan-out alone is *parallel*, not *collaborative*: every agent is dispatched
-    from the same routing decision and none can see what another produced. That
-    is fine when the question genuinely has independent parts ("my appointment
-    AND my blood test"), and useless when one agent's output is what another
-    agent needs as *input*.
+    from the same routing decision and none can see what another produced.
+    That is fine when a question has independent parts ("my appointment AND my
+    blood test") and useless when one agent's output is what another needs as
+    input.
 
-    The concrete failure it fixes: a consultation ends by saying "see a
-    gastroenterologist, and an abdominal ultrasound would settle it" — and
-    stops there. The admin agent could have found that gastroenterologist and
-    priced that ultrasound, but it was never dispatched, because at routing
-    time nobody knew a gastroenterologist would be the answer. The patient
-    reads a recommendation they cannot act on.
+    The concrete failure: a consultation ends with "see a gastroenterologist,
+    and an abdominal ultrasound would settle it" and stops. The admin agent
+    could have found that gastroenterologist and priced that ultrasound, but
+    it was never dispatched, because at routing time nobody knew a
+    gastroenterologist would be the answer.
 
-    So after merging, an agent may declare a *need* that another agent
-    satisfies, and that agent runs with the first one's conclusion as input.
-    This is real communication — B's query is derived from A's output — while
-    staying bounded in the ways that matter for a medical tool:
-
-    - **One hop only.** No loops, no negotiation, no emergent chatter. Latency
-      stays predictable and the trace stays readable.
-    - **Data, not prose.** The handoff carries a specialty code and a test
-      name, not free text for another model to reinterpret.
-    - **No new claims.** This node adds structured results to the reply; it
-      never rewrites the answer, so it cannot contradict the judge or the
-      red-flag engine.
+    This used to be a single hard-coded hop that handled exactly that case.
+    It is now a loop that decides for itself, bounded in the ways that matter
+    for a medical tool — see `app/agent/react.py` for the bounds and for why
+    the planner is shown outcomes but never contents.
     """
     started = time.perf_counter()
+
+    if state.get("confidential"):
+        # A private session writes nothing and reaches nothing. The loop can
+        # only read, but the cheapest guarantee is not to run it at all.
+        return {}
+
     consult_state = state.get("consult") or {}
-
-    # Only a completed assessment declares a need. A follow-up question does
-    # not — offering doctors mid-history-taking pushes the patient to book
-    # before anyone knows what they need.
-    if consult_state.get("mode") not in ("assess", "escalate"):
-        return {}
-
-    specialty = consult_state.get("specialty")
-    if not specialty:
-        return {}
-
-    scope = state.get("scope") or {}
-    red_flags = state.get("red_flags") or {}
     outputs = state.get("agent_outputs") or []
 
     # Already answered by a parallel admin branch — nothing to add.
     if any(o.get("route") == "admin" for o in outputs):
         return {}
 
-    tests = []
+    tests: list[dict] = []
     for output in outputs:
         if output.get("route") == "consult":
             tests = (output.get("structured", {}).get("consult", {}) or {}).get("tests", [])
             break
 
-    handoffs: list[dict] = []
-    structured: dict[str, Any] = {}
+    # The loop exists to *fulfil* — to turn a conclusion into something the
+    # patient can act on. With no conclusion there is nothing to fulfil, and
+    # running it anyway costs a model call plus several lookups on every
+    # message and produces the aimless wandering that gives these loops a bad
+    # name. Observed before this gate: four knowledge lookups on a turn that
+    # needed none.
+    assessed = consult_state.get("mode") in ("assess", "escalate")
+    if not (assessed and (consult_state.get("specialty") or tests)):
+        return {}
+
+    context = {
+        "user_text": state.get("user_text", ""),
+        "consult": consult_state,
+        "red_flags": state.get("red_flags") or {},
+        "suggested_tests": tests,
+    }
 
     with agent_session() as db:
-        # Handoff 1 — the specialty the consultation landed on becomes the
-        # provider query. This is the input the router could not have known.
-        started_tool = time.perf_counter()
-        try:
-            _, payload = TOOLS["find_care"](
-                db, scope,
-                specialty_code=specialty,
-                capabilities=red_flags.get("required_capabilities") or [],
-            )
-            structured.update(payload)
-            handoffs.append({
-                "tool": "find_care",
-                "status": "ok",
-                "from": "consult",
-                "because": f"assessment recommended {specialty}",
-                "ms": int((time.perf_counter() - started_tool) * 1000),
-            })
-        except ToolDenied as exc:
-            handoffs.append({"tool": "find_care", "status": "denied", "detail": str(exc)})
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Handoff find_care failed: %s", exc)
-            handoffs.append({"tool": "find_care", "status": "error"})
+        pad, loop_trace = run_loop(
+            context=context, scope=state.get("scope") or {}, db=db
+        )
 
-        # Handoff 2 — the tests the assessment suggested become a directory
-        # lookup, so "an ultrasound would settle it" arrives with places and
-        # prices attached rather than as an instruction to go and find one.
-        if tests:
-            started_tool = time.perf_counter()
-            try:
-                names = ", ".join(str(t.get("name", "")) for t in tests[:3])
-                _, payload = TOOLS["directory"](db, scope, question=names)
-                existing = structured.get("providers") or []
-                structured["providers"] = existing + [
-                    p for p in payload.get("providers", []) if p.get("kind") == "test"
-                ]
-                handoffs.append({
-                    "tool": "directory",
-                    "status": "ok",
-                    "from": "consult",
-                    "because": f"assessment suggested {names}",
-                    "ms": int((time.perf_counter() - started_tool) * 1000),
-                })
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Handoff directory failed: %s", exc)
-                handoffs.append({"tool": "directory", "status": "error"})
+    # Merge every payload the loop gathered. Providers accumulate across
+    # tools; anything else is last-write-wins, which is fine because each
+    # tool owns its own keys.
+    structured: dict[str, Any] = {}
+    providers: list[dict] = []
+    for payload in pad.payloads.values():
+        for key, value in payload.items():
+            if key == "providers" and isinstance(value, list):
+                providers.extend(value)
+            else:
+                structured[key] = value
+    if providers:
+        structured["providers"] = providers
+
+    handoffs = [
+        {
+            "tool": o.tool,
+            "status": o.status,
+            "from": "loop",
+            "because": f"step {o.step}",
+            "results": o.n_results,
+        }
+        for o in pad.observations
+    ]
 
     if not structured:
-        return {}
+        # Still report the reasoning even when nothing was found — a loop that
+        # looked and came back empty is information, and hiding it makes the
+        # trace lie about what happened.
+        return {
+            "trace": [{
+                "node": "fulfil",
+                "handoffs": handoffs,
+                "tools": handoffs,
+                "steps": loop_trace,
+                "source": "react_loop",
+                "ms": int((time.perf_counter() - started) * 1000),
+            }]
+        } if handoffs else {}
 
     return {
         # Attached under `admin` so the UI renders these exactly like any
@@ -896,28 +888,58 @@ def fulfil_node(state: AgentState) -> dict:
             "node": "fulfil",
             "handoffs": handoffs,
             "tools": handoffs,
-            "source": "agent_handoff",
+            "steps": loop_trace,
+            "source": "react_loop",
             "ms": int((time.perf_counter() - started) * 1000),
         }],
     }
 
 
 def judge_node(state: AgentState) -> dict:
-    """Output safety check. May soften or block; never escalates urgency."""
+    """Output safety check. May soften, block, or send back for one rewrite.
+
+    `BLOCK` stays terminal, and that distinction is the whole point of the
+    node. A safety block that can be retried until it passes is not a block —
+    given enough attempts a model will eventually phrase its way past any
+    check, so a mismatch with the deterministic urgency engine ends the turn
+    with the engine's own wording.
+
+    `SOFTEN` is different in kind: the answer is usable and something about it
+    is fixable — a missing "when to seek care", an unsupported claim, the
+    wrong shape. Substituting canned text there throws away a good answer to
+    fix a small fault. One rewrite is offered instead, and only one: past that
+    the canned replacement stands, so the loop cannot argue with the judge.
+    """
     red_flags = state.get("red_flags") or {}
     result = judge_output(
         state.get("answer", ""),
         engine_urgency=red_flags.get("urgency"),
     )
 
+    attempts = int(state.get("judge_attempts") or 0)
     answer = state.get("answer", "")
+
     if result.verdict == GuardVerdict.BLOCK:
         answer = result.replacement or red_flags.get("escalation_message") or (
             "Please speak to a clinician about this. You can find one under "
             "Doctors & Hospitals."
         )
-    elif result.verdict == GuardVerdict.SOFTEN and result.replacement:
-        answer = result.replacement
+    elif result.verdict == GuardVerdict.SOFTEN:
+        if attempts < 1 and answer.strip():
+            # Hand it back once with the failing rules attached as a
+            # constraint. `revise_node` runs next and returns here.
+            return {
+                "judge_attempts": attempts + 1,
+                "judge_constraints": result.matched_rules,
+                "trace": [{
+                    "node": "judge",
+                    "verdict": "regenerate",
+                    "rules": result.matched_rules,
+                    "source": "deterministic",
+                }],
+            }
+        if result.replacement:
+            answer = result.replacement
 
     guard = dict(state.get("guard") or {})
     guard.update(judge_summary(check_input(""), result))
@@ -925,11 +947,58 @@ def judge_node(state: AgentState) -> dict:
     return {
         "answer": answer,
         "guard": guard,
+        "judge_attempts": attempts,
+        # Cleared on the terminal path. The rewrite edge fires on the presence
+        # of a constraint, so leaving one set here sends the graph straight
+        # back into `revise` and it never stops.
+        "judge_constraints": [],
         "trace": [{
             "node": "judge",
             "verdict": str(result.verdict),
             "rules": result.matched_rules,
+            "regenerated": attempts > 0,
             "source": "deterministic",
+        }],
+    }
+
+
+def revise_node(state: AgentState) -> dict:
+    """Rewrite an answer to satisfy the rules the judge named.
+
+    Deliberately narrow: it may only rephrase what is already there against a
+    stated constraint. It is given no tools, no records and no new facts, so
+    the rewrite cannot introduce a claim the original did not make — which is
+    what keeps a second pass from becoming a second chance to be wrong.
+
+    With no model provider this returns the answer unchanged and the judge's
+    substitution applies on the next pass, so the offline path is unaffected.
+    """
+    started = time.perf_counter()
+    answer = state.get("answer", "")
+    constraints = state.get("judge_constraints") or []
+
+    instruction = (
+        "Rewrite the assistant's reply so it satisfies every requirement "
+        "below. Keep every fact and every recommendation exactly as they are "
+        "— change only wording and completeness. Add nothing new.\n\n"
+        f"Requirements: {', '.join(constraints) or 'be clearer and safer'}."
+    )
+
+    completion = llm.complete(
+        [{"role": "user", "content": f"{instruction}\n\nReply:\n{answer}"}],
+        temperature=0.2,
+        max_tokens=700,
+    )
+
+    revised = (completion.text or "").strip() if completion.ok else ""
+    return {
+        "answer": revised or answer,
+        "trace": [{
+            "node": "revise",
+            "constraints": constraints,
+            "changed": bool(revised) and revised != answer,
+            "source": "llm" if completion.ok else "unchanged",
+            "ms": int((time.perf_counter() - started) * 1000),
         }],
     }
 
@@ -941,6 +1010,13 @@ _AGENT_NODES = (
     "consult_agent", "admin_agent", "records_agent",
     "knowledge_agent", "web_agent", "direct_agent",
 )
+
+
+def _after_judge(state: AgentState) -> str:
+    """Take the rewrite edge only when the judge asked for one."""
+    if state.get("judge_constraints") and int(state.get("judge_attempts") or 0) == 1:
+        return "revise"
+    return END
 
 
 def _after_guard(state: AgentState) -> str:
@@ -968,6 +1044,7 @@ def build_agent_graph():
     graph.add_node("merge", merge_node)
     graph.add_node("fulfil", fulfil_node)
     graph.add_node("judge", judge_node)
+    graph.add_node("revise", revise_node)
 
     graph.add_edge(START, "guard_input")
     graph.add_conditional_edges(
@@ -988,7 +1065,14 @@ def build_agent_graph():
     # agents have run, before the answer is judged.
     graph.add_edge("merge", "fulfil")
     graph.add_edge("fulfil", "judge")
-    graph.add_edge("judge", END)
+
+    # The one cycle in the graph, and it is bounded by a counter rather than
+    # by a recursion limit: judge -> revise -> judge, at most once. `BLOCK`
+    # never takes this edge.
+    graph.add_conditional_edges(
+        "judge", _after_judge, {"revise": "revise", END: END}
+    )
+    graph.add_edge("revise", "judge")
 
     return graph.compile()
 
