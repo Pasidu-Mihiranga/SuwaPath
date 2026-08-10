@@ -11,6 +11,7 @@ import {
   formatDateTime,
   relativeDay,
 } from "../../components/ui";
+import { ProposalInbox } from "../../components/Proposals";
 import { api } from "../../lib/api";
 import type { Tone } from "../../styles/theme";
 
@@ -43,9 +44,14 @@ export function Dependents() {
       <header>
         <h1 className="text-2xl font-bold text-ink-900">My Dependents</h1>
         <p className="text-ink-500">
-          You see only what each person has chosen to share with you.
+          Ordered by who needs attention first. You see only what each person
+          has chosen to share with you.
         </p>
       </header>
+
+      {/* Suggestions the system prepared for the people you look after. The
+          API has always returned these to guardians; nothing rendered them. */}
+      <ProposalInbox />
 
       {items.length === 0 ? (
         <Empty

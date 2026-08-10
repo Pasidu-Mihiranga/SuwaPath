@@ -13,6 +13,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.services import dependent_risk
 from app.api.deps import get_patient_profile, get_relationship, require_permission
 from app.core.db import get_db
 from app.core.security import get_current_user, require_guardian, require_patient
@@ -84,10 +85,24 @@ def list_dependents(
             ).scalars().all()
         )
 
-        status_label, status_tone = _dependent_status(db, patient.id, granted)
+        # Ranked rather than listed. Each component of the score is gated by
+        # the scope that covers it, so the ordering itself cannot reveal a
+        # problem this guardian was not granted sight of.
+        risk = dependent_risk.assess(
+            db,
+            guardian_user_id=current_user.id,
+            patient_user_id=patient.id,
+            scopes=granted,
+        )
+        fallback_label, fallback_tone = _dependent_status(db, patient.id, granted)
+        status_label = risk.headline or fallback_label
+        status_tone = risk.tone if risk.headline else fallback_tone
 
         out.append(
             {
+                "attention_score": round(risk.score, 1),
+                "attention_reasons": [reason for _, reason in
+                                      sorted(risk.reasons, reverse=True)],
                 "patient_user_id": patient.id,
                 "name": patient.full_name,
                 "relationship": relationship.relationship_label,
@@ -103,6 +118,9 @@ def list_dependents(
                 "can_book_appointments": relationship.can_book_appointments,
             }
         )
+
+    # Whoever needs attention first, first.
+    out.sort(key=lambda d: d["attention_score"], reverse=True)
     return out
 
 
