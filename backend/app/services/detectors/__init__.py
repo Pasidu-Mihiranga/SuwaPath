@@ -20,7 +20,16 @@ from __future__ import annotations
 # system does on its own is greppable in one place.
 from app.services.detectors import appointments  # noqa: F401
 from app.services.detectors import checkins  # noqa: F401
+from app.services.detectors import directory  # noqa: F401
+from app.services.detectors import noshow  # noqa: F401
 from app.services.detectors import medication  # noqa: F401
 from app.services.detectors import referrals  # noqa: F401
 
-__all__ = ["appointments", "checkins", "medication", "referrals"]
+__all__ = [
+    "appointments",
+    "checkins",
+    "directory",
+    "medication",
+    "noshow",
+    "referrals",
+]

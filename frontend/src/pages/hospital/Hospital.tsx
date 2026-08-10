@@ -22,6 +22,7 @@ import {
   StatusChip,
   formatDateTime,
 } from "../../components/ui";
+import { ProposalInbox } from "../../components/Proposals";
 import { api } from "../../lib/api";
 import { chartColors } from "../../styles/theme";
 
@@ -81,6 +82,10 @@ export function HospitalDashboard() {
 
   return (
     <div className="space-y-6">
+      {/* What the models want done, as something you can approve — the
+          dashboard below tells you a lot and asks for nothing. */}
+      <ProposalInbox />
+
       <header>
         <h1 className="text-2xl font-bold text-ink-900">Admin Dashboard</h1>
         <p className="text-ink-500">

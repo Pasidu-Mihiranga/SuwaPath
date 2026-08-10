@@ -68,7 +68,7 @@ def cleanup(db) -> None:
 
 def main() -> int:
     db = SessionLocal()
-    client = httpx.Client(timeout=30.0)
+    client = httpx.Client(timeout=180.0)  # a directory rebuild re-embeds every collection
     try:
         cleanup(db)
 

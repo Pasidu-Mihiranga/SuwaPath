@@ -9,6 +9,7 @@ import {
   StatusChip,
   formatDateTime,
 } from "../../components/ui";
+import { ProposalInbox } from "../../components/Proposals";
 import { api, errorMessage } from "../../lib/api";
 
 function titleCase(value: string) {
@@ -33,6 +34,8 @@ export function AdminOverview() {
 
   return (
     <div className="space-y-6">
+      <ProposalInbox />
+
       <header>
         <h1 className="text-2xl font-bold text-ink-900">Platform Overview</h1>
         <p className="text-ink-500">SuwaPath system administration</p>
