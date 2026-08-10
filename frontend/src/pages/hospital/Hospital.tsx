@@ -406,6 +406,85 @@ function Metric({ label, value }: { label: string; value: any }) {
 
 /* --------------------------------------------------------------- No-show */
 
+/**
+ * How good is the model?
+ *
+ * Every number on this page used to be a prediction with nothing behind it.
+ * This card is the answer to "should I believe the risk percentages" — an
+ * honest AUC and calibration on held-out data, or a plain statement that
+ * there is not enough evidence yet.
+ */
+function ModelQuality() {
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    api
+      .get("/hospital/model-quality")
+      .then((r) => setData(r.data))
+      .catch(() => setData(null));
+  }, []);
+
+  if (!data?.backtest) return null;
+  const b = data.backtest;
+  if (b.status !== "ok") {
+    return (
+      <Card title="Model quality">
+        <Empty
+          title="Not enough resolved appointments yet"
+          hint="Accuracy is measured once appointments have been completed or marked missed."
+        />
+      </Card>
+    );
+  }
+
+  const pct = (v: number | null) => (v == null ? "—" : v.toFixed(3));
+  return (
+    <Card
+      title="Model quality"
+      subtitle="Measured on held-out appointments the model never trained on."
+    >
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Stat label="AUC" value={pct(b.auc)} hint="1.0 is perfect ranking, 0.5 is chance" />
+        <Stat label="Brier" value={pct(b.brier)} hint="lower is better" />
+        <Stat label="Calibration error" value={pct(b.ece)} hint="predicted vs observed" />
+        <Stat label="Tested on" value={String(b.n ?? 0)} hint="appointments" />
+      </div>
+
+      {Array.isArray(b.calibration) && b.calibration.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold text-ink-700 mb-1.5">
+            When it says X, how often does it happen?
+          </p>
+          <div className="space-y-1">
+            {b.calibration.map((row: any) => (
+              <div key={row.lower} className="flex items-center gap-2 text-sm">
+                <span className="w-24 text-ink-500">
+                  says {(row.predicted * 100).toFixed(0)}%
+                </span>
+                <span className="text-ink-400">→</span>
+                <span className="font-medium text-ink-900">
+                  {(row.observed * 100).toFixed(0)}% missed
+                </span>
+                <span className="text-xs text-ink-400">({row.n})</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.deployed?.status === "no_resolved_predictions" && (
+        <p className="mt-4 text-xs text-ink-500">
+          Live predictions are not graded yet — an appointment has to be
+          completed or marked missed by a person first. Statuses closed
+          automatically when a slot elapsed are excluded, because they record
+          that nobody updated the appointment rather than that the patient
+          did not attend.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 export function NoShow() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -428,6 +507,8 @@ export function NoShow() {
 
   return (
     <div className="space-y-5">
+      <ModelQuality />
+
       <header>
         <h1 className="text-2xl font-bold text-ink-900">No-show Risk</h1>
         <p className="text-ink-500">
