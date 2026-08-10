@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.care import Appointment
 from app.models.enums import AppointmentStatus, RiskBand, VisitType
 from app.models.platform import Forecast, NoShowPrediction
+from app.services import clock
 from app.models.providers import Doctor, DoctorSchedule, Hospital, Specialty
 
 logger = logging.getLogger(__name__)
@@ -164,17 +165,48 @@ def _train_logistic(
     )
 
 
-def _band(probability: float, base_rate: float = 0.15) -> RiskBand:
-    """Band a probability relative to the population's own no-show rate.
+def band_cuts(probabilities: list[float], base_rate: float) -> tuple[float, float]:
+    """Where "high" and "medium" begin, for this cohort.
 
-    Fixed thresholds break whenever the base rate shifts: at a 27% base rate a
-    0.45 cut-off leaves the "high" bucket permanently empty, and at a 5% base
-    rate almost everything looks low. Scaling to the base rate keeps the bands
-    meaningful — "high" means clearly worse than typical for this hospital —
-    while the floors stop tiny base rates producing alarmist labels.
+    The previous rule was `high = max(0.35, 2 x base_rate)`, scaled to the
+    base rate so it would survive a shifting no-show rate. It did not survive
+    a *weak model*: at a base rate of 0.23 the cut sits at 0.455 while the
+    highest probability this model produces is about 0.36, so the high band
+    was mathematically unreachable and the hospital dashboard's "high risk"
+    table was permanently empty. Its own docstring warned about exactly this
+    failure, one paragraph above the line that caused it.
+
+    The fix is to derive the cuts from the distribution the model actually
+    produces — the top decile is "high", the top third "medium" — with a floor
+    at the base rate so a genuinely low-risk cohort is never labelled alarming
+    just for being the worst of a good bunch.
+
+    Ranking is also what an administrator wants. Nobody asks "who is above
+    0.455"; they ask who is most worth a phone call tomorrow, and that
+    question stays answerable however the model is calibrated.
     """
-    high_cut = max(0.35, 2.0 * base_rate)
-    medium_cut = max(0.18, 1.15 * base_rate)
+    if not probabilities:
+        return max(0.35, 2.0 * base_rate), max(0.18, 1.15 * base_rate)
+
+    ordered = sorted(probabilities)
+    def percentile(fraction: float) -> float:
+        index = min(len(ordered) - 1, max(0, int(len(ordered) * fraction)))
+        return ordered[index]
+
+    high_cut = max(percentile(0.90), base_rate)
+    medium_cut = max(percentile(0.67), min(base_rate, high_cut))
+    return high_cut, min(medium_cut, high_cut)
+
+
+def _band(
+    probability: float,
+    base_rate: float = 0.15,
+    cuts: tuple[float, float] | None = None,
+) -> RiskBand:
+    """Band one probability. `cuts` comes from `band_cuts` for the cohort."""
+    if cuts is None:
+        cuts = (max(0.35, 2.0 * base_rate), max(0.18, 1.15 * base_rate))
+    high_cut, medium_cut = cuts
     if probability >= high_cut:
         return RiskBand.HIGH
     if probability >= medium_cut:
@@ -187,10 +219,10 @@ def _band(probability: float, base_rate: float = 0.15) -> RiskBand:
 # --------------------------------------------------------------------------
 def train_no_show_model(db: Session, *, hospital_id: str | None = None) -> LogisticModel:
     """Fit the model on resolved historical appointments."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=HISTORY_WINDOW_DAYS)
+    cutoff = clock.now() - timedelta(days=HISTORY_WINDOW_DAYS)
     stmt = select(Appointment).where(
         Appointment.scheduled_start >= cutoff,
-        Appointment.scheduled_start < datetime.now(timezone.utc),
+        Appointment.scheduled_start < clock.now(),
         Appointment.status.in_(
             [str(AppointmentStatus.COMPLETED), str(AppointmentStatus.NO_SHOW)]
         ),
@@ -220,9 +252,30 @@ def train_no_show_model(db: Session, *, hospital_id: str | None = None) -> Logis
     return _train_logistic(samples)
 
 
-def _patient_histories(db: Session, patient_ids: list[str]) -> dict[str, PatientHistory]:
+def _patient_histories(
+    db: Session, patient_ids: list[str], *, before: datetime | None = None
+) -> dict[str, PatientHistory]:
+    """Attendance history per patient, optionally as of a point in time.
+
+    `before` is what makes a backtest honest. Scoring live, every appointment
+    in this table is already in the past, so the unbounded query is correct.
+    Scoring a *historical* appointment to measure accuracy, it is not: without
+    a bound the patient's prior-no-show-rate would include the months that
+    came after the appointment being scored, and the model would look far
+    better than it is. That is the classic leak, and it is invisible in the
+    output — it just quietly inflates AUC.
+    """
     if not patient_ids:
         return {}
+    conditions = [
+        Appointment.patient_user_id.in_(patient_ids),
+        Appointment.status.in_(
+            [str(AppointmentStatus.COMPLETED), str(AppointmentStatus.NO_SHOW)]
+        ),
+    ]
+    if before is not None:
+        conditions.append(Appointment.scheduled_start < before)
+
     rows = db.execute(
         select(
             Appointment.patient_user_id,
@@ -231,12 +284,7 @@ def _patient_histories(db: Session, patient_ids: list[str]) -> dict[str, Patient
                 case((Appointment.status == str(AppointmentStatus.NO_SHOW), 1), else_=0)
             ).label("no_shows"),
         )
-        .where(
-            Appointment.patient_user_id.in_(patient_ids),
-            Appointment.status.in_(
-                [str(AppointmentStatus.COMPLETED), str(AppointmentStatus.NO_SHOW)]
-            ),
-        )
+        .where(*conditions)
         .group_by(Appointment.patient_user_id)
     ).all()
     return {
@@ -254,7 +302,7 @@ def predict_no_shows(
 ) -> list[dict]:
     """Score upcoming appointments and optionally persist the predictions."""
     model = train_no_show_model(db, hospital_id=hospital_id)
-    now = datetime.now(timezone.utc)
+    now = clock.now()
     horizon = now + timedelta(days=days_ahead)
 
     stmt = (
@@ -277,12 +325,19 @@ def predict_no_shows(
     appointments = list(db.execute(stmt).scalars().unique())
     histories = _patient_histories(db, [a.patient_user_id for a in appointments])
 
-    results: list[dict] = []
+    # Score everyone first, so the bands can be cut against the distribution
+    # this model actually produced rather than an absolute it may never reach.
+    scored = []
     for appointment in appointments:
         history = histories.get(appointment.patient_user_id, PatientHistory())
         features = _features(appointment, history)
-        probability = model.predict(features)
-        band = _band(probability, model.base_rate)
+        scored.append((appointment, features, model.predict(features)))
+
+    cuts = band_cuts([p for _, _, p in scored], model.base_rate)
+
+    results: list[dict] = []
+    for appointment, features, probability in scored:
+        band = _band(probability, model.base_rate, cuts)
 
         results.append(
             {
@@ -353,7 +408,7 @@ def _persist_predictions(db: Session, results: list[dict], model: LogisticModel)
 def no_show_summary(db: Session, *, hospital_id: str | None = None) -> dict:
     """Aggregate view for the hospital dashboard."""
     predictions = predict_no_shows(db, hospital_id=hospital_id, persist=False)
-    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    tomorrow = (clock.now() + timedelta(days=1)).date()
 
     by_band = {"high": 0, "medium": 0, "low": 0}
     for prediction in predictions:
@@ -366,10 +421,10 @@ def no_show_summary(db: Session, *, hospital_id: str | None = None) -> dict:
     ]
 
     # Historical realised rate, for comparison against predicted risk.
-    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    cutoff = clock.now() - timedelta(days=90)
     stmt = select(Appointment.status).where(
         Appointment.scheduled_start >= cutoff,
-        Appointment.scheduled_start < datetime.now(timezone.utc),
+        Appointment.scheduled_start < clock.now(),
         Appointment.status.in_(
             [str(AppointmentStatus.COMPLETED), str(AppointmentStatus.NO_SHOW)]
         ),
@@ -407,7 +462,7 @@ def _daily_demand(
     db: Session, *, hospital_id: str | None, days: int
 ) -> dict[str, dict[date, int]]:
     """Historical appointments per specialty per day."""
-    start = datetime.now(timezone.utc) - timedelta(days=days)
+    start = clock.now() - timedelta(days=days)
     stmt = (
         select(
             Specialty.code,
@@ -421,7 +476,7 @@ def _daily_demand(
         .join(Specialty, Doctor.specialty_id == Specialty.id)
         .where(
             Appointment.scheduled_start >= start,
-            Appointment.scheduled_start < datetime.now(timezone.utc),
+            Appointment.scheduled_start < clock.now(),
             Appointment.status != str(AppointmentStatus.CANCELLED),
         )
         .group_by(Specialty.code, "day")
@@ -535,7 +590,7 @@ def forecast_demand(
         .join(Doctor, Appointment.doctor_id == Doctor.id)
         .join(Specialty, Doctor.specialty_id == Specialty.id)
         .where(
-            Appointment.scheduled_start >= datetime.now(timezone.utc),
+            Appointment.scheduled_start >= clock.now(),
             Appointment.status.in_(
                 [str(AppointmentStatus.PENDING), str(AppointmentStatus.CONFIRMED)]
             ),
@@ -550,7 +605,7 @@ def forecast_demand(
         booked[(code, parsed)] = count
 
     out: list[dict] = []
-    generated_at = datetime.now(timezone.utc)
+    generated_at = clock.now()
 
     for specialty_code, counts in series.items():
         level, slope, factors, residual_std = _decompose(counts, history_days)

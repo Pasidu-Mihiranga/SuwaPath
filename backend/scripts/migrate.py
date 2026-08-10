@@ -60,6 +60,11 @@ MIGRATIONS: list[tuple[str, str]] = [
         "ALTER TABLE action_proposals ALTER COLUMN subject_user_id DROP NOT NULL",
     ),
     (
+        "appointments.status_source",
+        "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS status_source "
+        "VARCHAR(16) DEFAULT 'human'",
+    ),
+    (
         "index: proposals by audience",
         """
         CREATE INDEX IF NOT EXISTS ix_action_proposals_audience

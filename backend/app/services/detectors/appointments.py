@@ -86,7 +86,12 @@ def detect(db: Session) -> int:
 
         # The status change is a fact about the past and is applied directly.
         # Only the *response* to it goes through the task queue.
+        #
+        # Marked as swept rather than observed. Nobody watched this patient
+        # fail to arrive — the appointment simply elapsed with no one closing
+        # it, and the no-show model must not treat that as a label.
         appointment.status = AppointmentStatus.NO_SHOW
+        appointment.status_source = "auto_sweep"
 
         if runner.enqueue(
             db,
