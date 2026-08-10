@@ -70,6 +70,11 @@ class Action:
     summary: str
     run: Callable[..., dict[str, Any]]
     required_permission: GuardianPermissionType | None = None
+    # Whether this action operates on a person. Operational actions — reindex
+    # the directory, open clinic capacity — concern a hospital or the platform
+    # and have no patient. Declaring it means the approval endpoint can refuse
+    # clearly instead of failing on a missing attribute deep inside the action.
+    requires_subject: bool = True
 
 
 ACTIONS: dict[str, Action] = {}
@@ -81,10 +86,16 @@ def register(
     tier: str,
     summary: str,
     permission: GuardianPermissionType | None = None,
+    requires_subject: bool = True,
 ):
     def wrap(fn: Callable[..., dict[str, Any]]):
         ACTIONS[name] = Action(
-            name=name, tier=tier, summary=summary, run=fn, required_permission=permission
+            name=name,
+            tier=tier,
+            summary=summary,
+            run=fn,
+            required_permission=permission,
+            requires_subject=requires_subject,
         )
         return fn
 
@@ -233,6 +244,107 @@ def book_appointment(
 
 
 # --------------------------------------------------------------------------
+# T1 — operational, no patient
+# --------------------------------------------------------------------------
+@register(
+    "reindex_provider_directory",
+    tier="T1",
+    summary="Rebuild the searchable provider directory",
+    requires_subject=False,
+)
+def reindex_provider_directory(db: Session, **_: Any) -> dict[str, Any]:
+    """Rebuild the retrieval index so newly verified doctors become findable.
+
+    The directory is generated from live rows, so a doctor verified this
+    morning is invisible to search until this runs. It used to be a manual CLI
+    step that someone had to remember, which meant in practice it was skipped.
+    """
+    from app.services.knowledge import knowledge_service
+
+    counts = knowledge_service.reindex(db)
+    return {"indexed": counts}
+
+
+@register(
+    "send_appointment_reminders",
+    tier="T1",
+    summary="Send reminders for tomorrow's high-risk appointments",
+    requires_subject=False,
+)
+def send_appointment_reminders(
+    db: Session, *, appointment_ids: list[str] | None = None, **_: Any
+) -> dict[str, Any]:
+    """Remind the patients a model expects not to attend.
+
+    Two things happen here that matter beyond the reminder itself.
+
+    The no-show model's ninth feature is `reminders_sent`, and nothing in the
+    system has ever incremented it — it has been a constant zero, so the model
+    could never learn anything from it. Sending a reminder through this action
+    finally makes that feature vary.
+
+    A fifth of the high-risk appointments are deliberately left alone as a
+    control, chosen by a hash of the appointment id so the split is
+    deterministic and auditable rather than a random draw nobody can reproduce.
+    Without it, reminders would correlate with no-shows purely because we only
+    ever remind the risky ones, and the next training run would learn that
+    reminders *cause* absence.
+    """
+    from app.models.care import Appointment
+    from app.services.delivery import Message, deliver
+
+    sent, held_back = 0, 0
+    for appointment_id in appointment_ids or []:
+        appointment = db.get(Appointment, appointment_id)
+        if appointment is None:
+            continue
+
+        if _is_reminder_control(appointment.id):
+            held_back += 1
+            continue
+
+        patient = db.get(User, appointment.patient_user_id)
+        if patient is None:
+            continue
+
+        when = appointment.scheduled_start.astimezone(clock.local_zone())
+        deliver(
+            db,
+            patient,
+            Message(
+                title="Appointment reminder",
+                body=(
+                    f"You have an appointment on "
+                    f"{when.strftime('%a %d %b at %I:%M %p')}. "
+                    "Reply or open SuwaPath if you need to change it."
+                ),
+                priority=str(NotificationPriority.HIGH),
+                category=str(NotificationCategory.APPOINTMENT),
+                action_type="appointment",
+                action_id=appointment.id,
+            ),
+        )
+        appointment.reminder_sent_count = (appointment.reminder_sent_count or 0) + 1
+        sent += 1
+
+    db.flush()
+    return {"reminders_sent": sent, "control_group_held_back": held_back}
+
+
+# One in five, chosen by a stable hash rather than a random draw so the same
+# appointment is always on the same side of the experiment however often this
+# runs, and so the split can be recomputed by anyone reading the results.
+REMINDER_CONTROL_FRACTION = 5
+
+
+def _is_reminder_control(appointment_id: str) -> bool:
+    import hashlib
+
+    digest = hashlib.sha256(appointment_id.encode()).digest()
+    return digest[0] % REMINDER_CONTROL_FRACTION == 0
+
+
+# --------------------------------------------------------------------------
 # Proposals
 # --------------------------------------------------------------------------
 DEFAULT_PROPOSAL_TTL_DAYS = 14
@@ -241,7 +353,7 @@ DEFAULT_PROPOSAL_TTL_DAYS = 14
 def propose(
     db: Session,
     *,
-    subject: User,
+    subject: User | None = None,
     action_name: str,
     args: dict[str, Any],
     title: str,
@@ -251,12 +363,23 @@ def propose(
     origin: str = "job",
     origin_ref: str | None = None,
     ttl_days: int = DEFAULT_PROPOSAL_TTL_DAYS,
+    audience: User | None = None,
+    audience_role: Any | None = None,
+    audience_scope_id: str | None = None,
+    features: dict[str, Any] | None = None,
 ) -> str | None:
     """Record an action awaiting approval. Returns its id, or None if it exists.
 
     Uniqueness on `idempotency_key` is what stops a detector that runs daily
     from filling someone's inbox with the same suggestion.
+
+    `subject` is who the proposal is *about* and `audience` is who *decides*.
+    They are usually the same person and both may be omitted: an operational
+    proposal is about a hospital rather than a patient, and a role claim is
+    addressed to whoever currently holds a post rather than to a named user.
     """
+    if subject is None and audience is None and audience_role is None:
+        raise ActionError("A proposal needs a subject or an audience.")
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.models.agentic import ActionProposal
@@ -265,7 +388,11 @@ def propose(
     stmt = (
         pg_insert(ActionProposal)
         .values(
-            subject_user_id=subject.id,
+            subject_user_id=subject.id if subject else None,
+            audience_user_id=audience.id if audience else None,
+            audience_role=str(audience_role) if audience_role else None,
+            audience_scope_id=audience_scope_id,
+            features=features or {},
             origin=origin,
             origin_ref=origin_ref,
             action_name=action_name,

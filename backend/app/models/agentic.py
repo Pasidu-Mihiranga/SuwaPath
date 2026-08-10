@@ -122,16 +122,47 @@ class ActionProposal(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_action_proposals_idem"),
         Index("ix_action_proposals_inbox", "subject_user_id", "status"),
+        Index("ix_action_proposals_audience", "audience_user_id", "status"),
+        Index("ix_action_proposals_role", "audience_role", "audience_scope_id", "status"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
 
-    # Whose care this concerns — the patient, even when a guardian approves it.
-    subject_user_id: Mapped[str] = mapped_column(
+    # Whose care this concerns.
+    #
+    # Nullable, because not every proposal is about a person: a capacity
+    # decision belongs to a hospital and a reindex belongs to the platform.
+    subject_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
+
+    # Who decides.
+    #
+    # Separate from the subject because the two are frequently different
+    # people: a doctor deciding about a patient, a hospital administrator
+    # deciding about tomorrow's clinic. When both are unset the subject
+    # decides, which keeps every existing patient-facing proposal working
+    # unchanged.
+    #
+    # `audience_role` + `audience_scope_id` address a *claim* rather than a
+    # person — "whoever administers hospital X" — so a proposal survives staff
+    # turnover and does not need re-targeting when someone goes on leave.
+    audience_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    audience_role: Mapped[str | None] = mapped_column(String(16))
+    audience_scope_id: Mapped[str | None] = mapped_column(String(36))
+
     origin: Mapped[str] = mapped_column(String(16), default="job")  # job | chat
     origin_ref: Mapped[str | None] = mapped_column(String(64))
+
+    # Feature snapshot taken at propose time.
+    #
+    # Written now so an acceptance model can be trained later without
+    # reconstructing features against data that has since changed — the count
+    # of pending proposals, for one, is different the moment a decision is
+    # made. Recomputing at training time is the classic leak.
+    features: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     action_name: Mapped[str] = mapped_column(String(64), index=True)
     args: Mapped[dict] = mapped_column(JSONB, default=dict)
