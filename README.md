@@ -98,7 +98,10 @@ demand forecast. It is one workflow, not five dashboards.
 | **Consent-controlled guardians** | Deny-by-default. A guardian sees only what the patient explicitly granted, and withheld sections are shown as withheld rather than silently hidden. |
 | **Hospital intelligence** | No-show risk and 7-day specialty demand forecasting, both fitted on the hospital's own historical appointments. |
 | **Private mode** | Encrypted under a key derived from the user's PIN and never stored, so the server cannot read it unattended. Invisible in history, gone in 12 hours. |
-| **Acts without being asked** | Four detectors run on a schedule and notice what nobody reports: care that was recommended but never booked, doses that stopped being taken, appointments that elapsed, check-ins that stopped. |
+| **Reasons, not just retrieves** | A bounded plan-act-observe loop chooses its own lookups and stops when it has enough. The planner sees whether a lookup returned anything, never what it returned. |
+| **Every role has an agent** | Patients, doctors, guardians, hospital administrators and system administrators all both receive and originate autonomous work. |
+| **Models that are measured** | AUC, Brier and calibration on held-out data, shown on the dashboard beside the predictions they grade. |
+| **Acts without being asked** | Eight detectors run on a schedule and notice what nobody reports: care that was recommended but never booked, doses that stopped being taken, appointments that elapsed, check-ins that stopped. |
 | **Prepares, then asks** | A stalled referral becomes a specific bookable action — named doctor, a facility that can run the required test, real slot, real fee — waiting on one tap. Nothing clinical is ever automated. |
 | **Encrypted at rest** | AES-256-GCM over conversation content in the application layer, not just on the disk, with a 90-day retention window. |
 | **Answers before generating** | Greetings and product FAQs return reviewed answers from cache in ~0 ms. Nothing clinical is ever cached — near-identical questions have completely different correct answers. |
@@ -852,7 +855,8 @@ Covers the autonomy layer against a virtual clock: detection without a
 request, idempotent re-runs, the per-patient cap, proposal-then-approval, and
 the safety negatives.
 
-**Current status: 73 scenario checks and 23 agentic checks passing, 0 failing.**
+**Current status: 73 scenario, 23 agentic, 23 reasoning, 15 role and 11
+coverage checks passing, 0 failing.**
 
 ---
 
@@ -937,9 +941,13 @@ exactly why they are missed.
 | Job | Every | What it notices |
 |---|---|---|
 | `detect_unconverted_referrals` | 6 h | Care that was recommended and never arranged |
+| `detect_lapsed_followups` | 12 h | Follow-ups a doctor asked for that nobody booked |
 | `materialise_and_check_medication` | 1 h | Doses whose time passed with nothing recorded, then runs of missed doses |
 | `sweep_elapsed_appointments` | 15 min | Appointments whose slot came and went |
 | `detect_checkin_lapses` | 12 h | Elderly check-ins that stopped arriving |
+| `detect_noshow_batches` | 12 h | Tomorrow's appointments most likely to be missed |
+| `detect_directory_staleness` | 30 min | Providers added or verified since the search index was built |
+| `detect_disengagement` | 24 h | Someone who has gone quiet across every channel, or whose adherence is sliding |
 
 Detectors are **pure**: they read, and they queue work. They never send, book
 or alert. Acting is a handler's job, and handlers run once. That split is what
@@ -964,6 +972,44 @@ At most **three open follow-ups per person**. A patient with a long history has
 dozens of active recommendations, and chasing all of them produces an inbox
 nobody reads — an unread reminder is worth less than no reminder, because it
 also teaches people to ignore the next one.
+
+### How the agent reasons
+
+After the parallel agents merge, a bounded loop decides what else is needed:
+it plans one lookup, runs it, observes the outcome, and either continues or
+stops. Four steps, six tool calls, a twelve-second deadline, and a repeat-call
+detector that refuses an identical query rather than running it twice.
+
+**The planner is shown outcomes, never contents** — `{"tool": "find_care",
+"status": "ok", "n_results": 3}`. Planning needs to know whether something
+came back, not what came back. Because content never enters the planning
+prompt, a records lookup cannot carry patient values into a later web search:
+the boundary holds structurally rather than by policy. Content is read once,
+by the synthesis step, under a single route's field allowlist.
+
+The loop runs only when there is a conclusion to act on. With no model
+provider configured it falls back to a deterministic planner that reproduces
+the previous fixed behaviour exactly, so a deployment with no API keys is
+unaffected.
+
+The output judge can send an answer back for **one** rewrite when the fault is
+fixable. A block is terminal — a safety check that can be retried until it
+passes is not a check.
+
+### Roles, and what each one's agent does
+
+| Role | Receives | Originates |
+|---|---|---|
+| patient | booking suggestions, reminders | referral conversion, medication, check-in, disengagement |
+| doctor | lapsed-follow-up recalls for their own patients | recall batches addressed to themselves |
+| guardian | consent-scoped alerts, dependents ranked by who needs attention | alerts raised on their dependents' behalf |
+| hospital admin | tomorrow's high-risk appointments, as one batch | reminder batches scoped to their hospital |
+| system admin | directory rebuilds when providers change | reindex proposals |
+
+A proposal is addressed either to a person or to a *role claim* — "whoever
+administers hospital X" — so it survives staff changes. Authority is
+re-derived at approval time and never inherited from whoever proposed it: a
+guardian-originated message to a doctor does not carry the guardian's consent.
 
 ### What the system may do by itself
 
@@ -1002,10 +1048,34 @@ names no condition.
 No SMS gateway is configured by default; the no-op provider records the attempt
 so the whole path stays testable.
 
+### Measuring the models
+
+```bash
+GET /api/v1/hospital/model-quality
+```
+
+Two views. A **time-split backtest** fits on the older history and grades the
+newer, which says whether the approach works. **Grading the stored
+predictions** compares what the system actually predicted against what
+happened, which is the one that catches drift.
+
+Current backtest, on synthetic data: AUC 0.62, Brier 0.16, calibration error
+0.02 over 1,867 held-out appointments. Modest and honest — nine weak features
+over generated histories.
+
+Statuses written by the automatic sweep are **excluded from every label set**.
+A swept appointment records that nobody closed it, not that a patient failed
+to attend, and training on it teaches the model to predict administrative
+neglect.
+
 ### Verifying it
 
 ```bash
-cd backend && python tests/test_agentic.py
+cd backend && python tests/test_agentic.py   # the autonomy layer
+cd backend && python tests/test_react.py     # the reasoning loop and its bounds
+cd backend && python tests/test_roles.py     # who may see and approve what
+cd backend && python tests/test_coverage.py  # every ladder stage and T0 action runs
+cd backend && python tests/test_enums.py     # every enum reference resolves
 ```
 
 Every detector reads the time from `app/services/clock.py`, so the suite can
@@ -1139,7 +1209,9 @@ What is fully implemented, and what is a placeholder.
 | Guardrails and output judge | **Real** — deterministic, both sides of the graph; urgency never model-set |
 | PHI boundary | **Real** — per-route allowlist, pseudonymisation, egress guard, audit |
 | Private chat | **Real** — encrypted under a PBKDF2 key derived from the user's PIN; absent from history; 12-hour expiry |
-| Autonomy layer | **Real** — 4 scheduled detectors, durable task queue, dedupe by intent, `SKIP LOCKED` claiming, advisory-lock singleton |
+| Agent reasoning | **Real** — bounded plan-act-observe loop, metadata-only planner, one judge rewrite, deterministic fallback with no API key |
+| Model evaluation | **Real** — AUC, PR-AUC, Brier, ECE and a calibration table in pure numpy, on a held-out time split |
+| Autonomy layer | **Real** — 8 scheduled detectors, durable task queue, dedupe by intent, `SKIP LOCKED` claiming, advisory-lock singleton |
 | Agent actions | **Real** — T0/T1/T2 risk ladder, proposals re-authorised at execution, one shared booking path |
 | SMS delivery | **Path real, gateway not connected** — routing, quiet hours, escalation and the no-clinical-content rule all run; the no-op provider records attempts |
 | Encryption at rest | **Real** — AES-256-GCM over conversation content, versioned ciphertext, 90-day retention |
