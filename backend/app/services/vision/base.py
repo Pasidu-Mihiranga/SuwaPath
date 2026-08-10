@@ -56,6 +56,16 @@ class ModelAdapter(ABC):
     # False for the bundled baseline, so the UI can label it honestly.
     is_trained_model: bool = True
 
+    # The operating point. 0.5 with a symmetric band is the neutral default;
+    # a trained screening model tuned for sensitivity overrides both from the
+    # sidecar shipped beside its weights. Surfaced in `describe()` because a
+    # screening tool whose threshold is invisible cannot be audited — and
+    # because a model silently scoring at 0.5 when it was tuned for 0.165 is
+    # exactly the failure the sidecar exists to prevent.
+    decision_threshold: float = 0.5
+    uncertainty_bounds: tuple[float, float] | None = None
+    operating_point: dict | None = None
+
     @abstractmethod
     def is_available(self) -> bool:
         """True when this adapter can actually run inference."""
@@ -78,6 +88,14 @@ class ModelAdapter(ABC):
             "supports_heatmap": self.supports_heatmap,
             "available": self.is_available(),
             "is_trained_model": self.is_trained_model,
+            "decision_threshold": self.decision_threshold,
+            "uncertainty_bounds": list(self.uncertainty_bounds)
+            if self.uncertainty_bounds
+            else None,
+            "operating_point": self.operating_point,
+            # A trained model with no sidecar is running at a default
+            # threshold that nobody chose. Worth a warning in the console.
+            "sidecar_present": bool(self.operating_point),
         }
 
 
@@ -123,7 +141,13 @@ def write_heatmap(
     blended = np.clip(grey_rgb * (1 - alpha) + coloured * alpha, 0, 1)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray((blended * 255).astype(np.uint8)).save(destination)
+    # compress_level=1 rather than the default 6. Encoding dominates the cost
+    # of producing a heatmap — by an order of magnitude over the occlusion
+    # sweep — and these are transient explanation images, not archives. The
+    # file is somewhat larger and written several times faster.
+    Image.fromarray((blended * 255).astype(np.uint8)).save(
+        destination, format="PNG", compress_level=1
+    )
     return str(destination)
 
 
@@ -142,6 +166,7 @@ def occlusion_saliency(
     *,
     grid: int = 8,
     patch_scale: float = 1.5,
+    score_batch_fn=None,
 ) -> np.ndarray:
     """Model-agnostic saliency by occlusion sensitivity.
 
@@ -149,15 +174,45 @@ def occlusion_saliency(
     score drops. Works for any black-box adapter, including ONNX graphs whose
     internals are not exposed, so a dropped-in model still gets a visual
     explanation without needing named conv layers for Grad-CAM.
+
+    An 8x8 grid means 65 forward passes, and that is not cheap. Measured on
+    the untrained baseline adapter, a prediction takes 11 ms and the heatmap
+    takes 2.1 seconds — the explanation costs two hundred times the answer.
+
+    Two things bring it down:
+
+    **The sweep runs on a downsampled copy.** The output is an 8x8 grid however
+    large the input, and every adapter resizes to its own input size anyway, so
+    scoring a 512x512 image 65 times is work thrown away. `write_heatmap` still
+    renders against the full-resolution original.
+
+    **`score_batch_fn` scores every occlusion in one call**, which is why the
+    exported ONNX graph keeps a dynamic batch axis.
     """
+    # Comfortably above the 224 that the models want, so downsampling cannot
+    # be what loses detail, and far below the 1-2 MP a real radiograph carries.
+    max_side = 256
+    longest = max(image.shape)
+    if longest > max_side:
+        from PIL import Image as PILImage
+
+        scale = max_side / longest
+        target = (max(1, int(image.shape[1] * scale)), max(1, int(image.shape[0] * scale)))
+        image = np.asarray(
+            PILImage.fromarray((image * 255).astype(np.uint8)).resize(
+                target, PILImage.BILINEAR
+            ),
+            dtype=np.float32,
+        ) / 255.0
+
     height, width = image.shape
-    baseline = score_fn(image)
     saliency = np.zeros((grid, grid), dtype=np.float32)
 
     patch_h = max(1, int(height / grid * patch_scale))
     patch_w = max(1, int(width / grid * patch_scale))
     fill = float(image.mean())
 
+    variants: list[np.ndarray] = []
     for row in range(grid):
         for col in range(grid):
             centre_y = int((row + 0.5) * height / grid)
@@ -169,7 +224,18 @@ def occlusion_saliency(
 
             occluded = image.copy()
             occluded[y0:y1, x0:x1] = fill
-            # A large drop means the region mattered to the prediction.
-            saliency[row, col] = max(0.0, baseline - score_fn(occluded))
+            variants.append(occluded)
+
+    if score_batch_fn is not None:
+        # The original goes first so the baseline costs no extra call.
+        scores = list(score_batch_fn([image, *variants]))
+        baseline, occluded_scores = scores[0], scores[1:]
+    else:
+        baseline = score_fn(image)
+        occluded_scores = [score_fn(variant) for variant in variants]
+
+    for index, score in enumerate(occluded_scores):
+        # A large drop means the region mattered to the prediction.
+        saliency[index // grid, index % grid] = max(0.0, baseline - score)
 
     return saliency
