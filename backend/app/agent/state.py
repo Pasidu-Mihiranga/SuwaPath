@@ -92,4 +92,9 @@ class AgentState(TypedDict, total=False):
     guard: dict[str, Any]
     # Actions the UI can offer inline (book, upload, open a page).
     actions: list[dict[str, Any]]
+
+    # Judge feedback. `judge_attempts` caps the rewrite at one, so a model can
+    # never keep rephrasing until a safety rule stops matching.
+    judge_attempts: int
+    judge_constraints: list[str]
     trace: Annotated[list[dict], operator.add]
