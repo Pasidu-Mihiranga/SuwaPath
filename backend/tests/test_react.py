@@ -240,6 +240,113 @@ def main() -> int:
         third.get("action") == "finish",
     )
 
+    section("The judge/revise cycle always terminates")
+
+    # The graph has exactly one cycle. The first version of it never cleared
+    # the constraint on the terminal path, so the rewrite edge kept firing and
+    # LangGraph died with GraphRecursionError after 25 hops. It was caught by
+    # a manual call returning an empty answer, not by a test — which is the
+    # same gap that let three undefined enum references ship. So: a test.
+    from app.agent import graph as agent_graph
+    from app.agent.guardrails import GuardResult, GuardVerdict
+
+    original_judge = agent_graph.judge_output
+    original_llm = agent_graph.llm
+
+    class _NoProvider:
+        """No model answers, so `revise` returns the text unchanged.
+
+        The nastiest case for termination: the rewrite cannot fix anything, so
+        a cycle that relied on the answer improving would spin for ever.
+        """
+
+        @staticmethod
+        def complete(*args, **kwargs):
+            class _Failed:
+                ok = False
+                text = ""
+            return _Failed()
+
+    # A judge that is never satisfied.
+    agent_graph.judge_output = lambda answer, engine_urgency=None: GuardResult(
+        verdict=GuardVerdict.SOFTEN,
+        replacement="Please speak to a clinician.",
+        matched_rules=["missing_safety_netting"],
+    )
+    agent_graph.llm = _NoProvider
+
+    try:
+        state: dict = {"answer": "Take two aspirin.", "red_flags": {}, "trace": []}
+        visited: list[str] = []
+
+        for _ in range(20):  # generous; termination should need far fewer
+            update = agent_graph.judge_node(state)
+            state.update({k: v for k, v in update.items() if k != "trace"})
+            visited.append("judge")
+
+            if agent_graph._after_judge(state) != "revise":
+                break
+
+            update = agent_graph.revise_node(state)
+            state.update({k: v for k, v in update.items() if k != "trace"})
+            visited.append("revise")
+
+        check(
+            "The cycle terminates",
+            visited[-1] == "judge" and len(visited) < 20,
+            " -> ".join(visited),
+        )
+        check(
+            "It rewrites exactly once, never twice",
+            visited.count("revise") == 1,
+            f"{visited.count('revise')} rewrites",
+        )
+        check(
+            "The constraint is cleared so the edge cannot re-fire",
+            not state.get("judge_constraints"),
+        )
+        check(
+            "An unsatisfiable judge still yields its replacement",
+            state.get("answer") == "Please speak to a clinician.",
+            repr(state.get("answer"))[:60],
+        )
+
+        # A BLOCK must never take the rewrite edge at all.
+        agent_graph.judge_output = lambda answer, engine_urgency=None: GuardResult(
+            verdict=GuardVerdict.BLOCK,
+            replacement="Seek urgent care.",
+            matched_rules=["urgency_mismatch"],
+        )
+        blocked: dict = {"answer": "It is probably nothing.", "red_flags": {}}
+        update = agent_graph.judge_node(blocked)
+        blocked.update({k: v for k, v in update.items() if k != "trace"})
+        check(
+            "A blocked answer is never sent for rewrite",
+            agent_graph._after_judge(blocked) != "revise",
+        )
+        check(
+            "A block replaces the answer immediately",
+            blocked.get("answer") == "Seek urgent care.",
+        )
+    finally:
+        agent_graph.judge_output = original_judge
+        agent_graph.llm = original_llm
+
+    section("The graph has exactly one cycle")
+
+    compiled = agent_graph.build_agent_graph()
+    edges = compiled.get_graph().edges
+    back_edges = [
+        (e.source, e.target)
+        for e in edges
+        if (e.source, e.target) in (("revise", "judge"), ("judge", "revise"))
+    ]
+    check(
+        "judge <-> revise is the only loop in the graph",
+        len(back_edges) == 2,
+        str(back_edges),
+    )
+
     print("\n" + "=" * 74)
     print("RESULTS")
     print("=" * 74)
