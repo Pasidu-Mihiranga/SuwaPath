@@ -24,11 +24,11 @@ const ACTIONS: {
   icon: IconName;
   primary?: boolean;
 }[] = [
-  { to: "/patient/symptom-check", label: "Start Symptom Check", icon: "chat", primary: true },
-  { to: "/patient/find-care", label: "Find Doctor / Hospital", icon: "hospital" },
-  { to: "/patient/reports", label: "Upload Medical Report", icon: "description" },
-  { to: "/patient/imaging", label: "Medical Image Screening", icon: "scan" },
-];
+    { to: "/patient/symptom-check", label: "Start Symptom Check", icon: "chat", primary: true },
+    { to: "/patient/find-care", label: "Find Doctor / Hospital", icon: "hospital" },
+    { to: "/patient/reports", label: "Upload Medical Report", icon: "description" },
+    { to: "/patient/imaging", label: "Medical Image Screening", icon: "scan" },
+  ];
 
 const PROGRAMME_STYLE: Record<string, string> = {
   maternal: "sp-gradient-maternal",
@@ -133,325 +133,320 @@ export default function PatientDashboard() {
           of empty space under the short hero next to the long recommendation.
           As columns each side flows at its own pace and the cards below move
           up into the space instead of starting beneath it. */}
-      <div className="grid lg:grid-cols-3 gap-4 lg:gap-6 items-start">
-        <div className="lg:col-span-2 space-y-4 lg:space-y-6">
-        <div className="sp-card sp-gradient-brand-soft p-5 sm:p-6 flex gap-3 sm:gap-4 overflow-hidden">
-          <div className="flex-1 min-w-0">
-            <h1 className="sp-display text-2xl sm:text-[1.75rem]">
-              Welcome back, {user?.full_name.split(" ")[0]}
-            </h1>
-            <p className="mt-1 text-ink-600">
-              Let's take the next best step for your health.
-            </p>
-            {/* A fixed two-column grid rather than a wrapping row. Buttons
+      <div className="grid lg:grid-cols-3 gap-4 lg:gap-6 items-start w-full min-w-0">
+        <div className="lg:col-span-2 space-y-4 lg:space-y-6 w-full min-w-0">
+          <div className="sp-card sp-gradient-brand-soft pt-5 px-5 pb-3 sm:pt-6 sm:px-6 sm:pb-4 flex gap-3 sm:gap-4 overflow-hidden items-center">
+            <div className="flex-1 min-w-0 py-2">
+              <h1 className="sp-display text-2xl sm:text-[1.75rem]">
+                Welcome back, {user?.full_name.split(" ")[0]}
+              </h1>
+              <p className="mt-1 text-ink-600">
+                Let's take the next best step for your health.
+              </p>
+              {/* A fixed two-column grid rather than a wrapping row. Buttons
                 sized to their labels wrapped into a ragged block where no two
                 edges lined up; on a grid every action is the same width and
                 the four read as one set of equal choices. The width cap keeps
                 them from stretching into banners on a wide screen, which is
                 the reason sp-btn-block exists — see components.css. */}
-            <div className="mt-5 grid gap-2.5 sm:grid-cols-2 max-w-[32rem]">
-              {ACTIONS.map((action) => (
-                <Link
-                  key={action.to}
-                  to={action.to}
-                  className={`sp-btn sp-btn-block justify-start ${
-                    action.primary ? "sp-btn-primary" : "sp-btn-secondary bg-white"
-                  }`}
-                >
-                  <Icon name={action.icon} size={18} className="shrink-0" />
-                  <span className="truncate">{action.label}</span>
-                </Link>
-              ))}
+              <div className="mt-5 grid gap-2.5 sm:grid-cols-2 max-w-[32rem]">
+                {ACTIONS.map((action) => (
+                  <Link
+                    key={action.to}
+                    to={action.to}
+                    className={`sp-btn sp-btn-block justify-start ${action.primary ? "sp-btn-primary" : "sp-btn-secondary bg-white"
+                      }`}
+                  >
+                    <Icon name={action.icon} size={18} className="shrink-0" />
+                    <span className="truncate">{action.label}</span>
+                  </Link>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Decorative and gender-aware where the patient told us, neutral
+            {/* Decorative and gender-aware where the patient told us, neutral
               where they did not — see lib/illustration.ts. Hidden from
               assistive tech: it carries nothing the text does not. Shown on
               mobile too, just narrower — it is the one piece of the page that
               reflects the person using it. */}
-          <img
-            src={patientIllustration({
-              sex: data.patient?.sex,
-              age: data.patient?.age,
-            })}
-            alt=""
-            aria-hidden="true"
-            loading="lazy"
-            className="pointer-events-none w-28 shrink-0 self-end select-none object-contain object-bottom sm:w-36 lg:w-48"
-          />
-        </div>
+            <img
+              src={patientIllustration({
+                sex: data.patient?.sex,
+                age: data.patient?.age,
+              })}
+              alt=""
+              aria-hidden="true"
+              loading="lazy"
+              className="pointer-events-none hidden sm:block sm:w-36 lg:w-48 max-h-[14rem] shrink-0 self-end select-none object-contain object-bottom"
+            />
+          </div>
 
           {/* Appointments and reports sit inside the left column so they
               rise into the space beside the recommendation card rather
               than starting below it. */}
           <div className="grid sm:grid-cols-2 gap-4 lg:gap-6">
-          {/* Appointments */}
-          <Card
-            title="Upcoming Appointments"
-            action={
-              <Link to="/patient/appointments" className="text-sm font-semibold text-brand-700 hover:underline">
-                View all
-              </Link>
-            }
-          >
-            {data.upcoming_appointments?.length ? (
-              <div className="space-y-3">
-                {data.upcoming_appointments.map((appointment: any) => (
-                  <div
-                    key={appointment.id}
-                    className="rounded-xl border border-ink-100 p-3.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="sp-chip bg-brand-100 text-brand-800">
-                        {appointment.visit_type === "teleconsultation"
-                          ? "Teleconsultation"
-                          : "In-person visit"}
-                      </span>
-                      <StatusChip value={appointment.status} />
-                    </div>
-                    <div className="mt-2.5 flex items-baseline justify-between gap-2">
-                      <p className="font-semibold text-ink-900">
-                        {relativeDay(appointment.scheduled_start)}
+            {/* Appointments */}
+            <Card
+              title="Upcoming Appointments"
+              action={
+                <Link to="/patient/appointments" className="text-sm font-semibold text-brand-700 hover:underline">
+                  View all
+                </Link>
+              }
+            >
+              {data.upcoming_appointments?.length ? (
+                <div className="space-y-3">
+                  {data.upcoming_appointments.map((appointment: any) => (
+                    <div
+                      key={appointment.id}
+                      className="rounded-xl border border-ink-100 p-3.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="sp-chip bg-brand-100 text-brand-800">
+                          {appointment.visit_type === "teleconsultation"
+                            ? "Teleconsultation"
+                            : "In-person visit"}
+                        </span>
+                        <StatusChip value={appointment.status} />
+                      </div>
+                      <div className="mt-2.5 flex items-baseline justify-between gap-2">
+                        <p className="font-semibold text-ink-900">
+                          {relativeDay(appointment.scheduled_start)}
+                        </p>
+                        <p className="text-sm text-ink-600">
+                          {new Date(appointment.scheduled_start).toLocaleTimeString(
+                            "en-GB",
+                            { hour: "2-digit", minute: "2-digit" },
+                          )}
+                        </p>
+                      </div>
+                      <p className="text-sm text-ink-700 mt-1">
+                        {appointment.doctor_name}
                       </p>
-                      <p className="text-sm text-ink-600">
-                        {new Date(appointment.scheduled_start).toLocaleTimeString(
-                          "en-GB",
-                          { hour: "2-digit", minute: "2-digit" },
-                        )}
+                      <p className="text-xs text-ink-500">
+                        {appointment.specialty_name} · {appointment.hospital_name}
                       </p>
                     </div>
-                    <p className="text-sm text-ink-700 mt-1">
-                      {appointment.doctor_name}
-                    </p>
-                    <p className="text-xs text-ink-500">
-                      {appointment.specialty_name} · {appointment.hospital_name}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Empty title="No upcoming appointments" />
-            )}
-          </Card>
-
-          {/* Reports */}
-          <Card
-            title="Understand Your Medical Reports"
-            action={
-              <Link to="/patient/reports" className="text-sm font-semibold text-brand-700 hover:underline">
-                View all
-              </Link>
-            }
-          >
-            {data.recent_report ? (
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <span className="sp-icon-tile bg-brand-50 text-brand-700">
-                    <Icon name="description" size={20} />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="font-medium text-ink-900 truncate">
-                      {data.recent_report.file_name}
-                    </p>
-                    <p className="text-xs text-ink-500">
-                      Uploaded {formatDateTime(data.recent_report.uploaded_at)}
-                    </p>
-                  </div>
+                  ))}
                 </div>
-                <div className="rounded-xl bg-ink-50 p-3">
-                  <p className="text-xs font-semibold text-ink-700">Summary</p>
-                  <p className="text-sm text-ink-600 mt-0.5">
-                    {data.recent_report.summary ?? "Processing…"}
+              ) : (
+                <Empty title="No upcoming appointments" />
+              )}
+            </Card>
+
+            {/* Reports */}
+            <Card
+              title="Understand Your Medical Reports"
+              action={
+                <Link to="/patient/reports" className="text-sm font-semibold text-brand-700 hover:underline">
+                  View all
+                </Link>
+              }
+            >
+              {data.recent_report ? (
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3">
+                    <span className="sp-icon-tile bg-brand-50 text-brand-700">
+                      <Icon name="description" size={20} />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-ink-900 truncate">
+                        {data.recent_report.file_name}
+                      </p>
+                      <p className="text-xs text-ink-500">
+                        Uploaded {formatDateTime(data.recent_report.uploaded_at)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-ink-50 p-3">
+                    <p className="text-xs font-semibold text-ink-700">Summary</p>
+                    <p className="text-sm text-ink-600 mt-0.5">
+                      {data.recent_report.summary ?? "Processing…"}
+                    </p>
+                  </div>
+                  <Link to="/patient/reports" className="sp-btn sp-btn-secondary sp-btn-sm">
+                    View explanation
+                  </Link>
+                </div>
+              ) : (
+                <Empty
+                  title="No reports yet"
+                  hint="Upload a lab report to get a plain-language explanation."
+                />
+              )}
+            </Card>
+          </div>
+          {/* Care programmes — inside left column so it flows right
+              below appointments/reports without waiting for the tall
+              right column to finish. */}
+          <Card
+            title="Care Programmes"
+            action={
+              <Link to="/patient/programmes" className="text-sm font-semibold text-brand-700 hover:underline">
+                View all
+              </Link>
+            }
+          >
+            {
+              <div className="grid gap-3 sm:grid-cols-2">
+                {!data.care_programmes?.length && (
+                  <div className="sm:col-span-2">
+                    <Empty
+                      title="Not enrolled in a care programme"
+                      hint="Maternal and elderly pathways are available."
+                    />
+                  </div>
+                )}
+                {data.care_programmes?.map((programme: any) => (
+                  <ProgrammeCard
+                    key={programme.id}
+                    to="/patient/programmes"
+                    accent={PROGRAMME_STYLE[programme.type] ?? "sp-gradient-elderly"}
+                    art={programmeIllustration(programme.type)}
+                    title={programme.name}
+                    subtitle={
+                      data.maternal_summary && programme.type === "maternal"
+                        ? `Pregnancy week ${data.maternal_summary.pregnancy_week}`
+                        : "Reminders, check-ins and follow-up."
+                    }
+                  >
+                    <div className="h-1.5 rounded-full bg-white/70 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-brand-600"
+                        style={{ width: `${programme.progress_percent}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-ink-500 mt-1.5">
+                      {Math.round(programme.progress_percent)}% complete
+                    </p>
+                  </ProgrammeCard>
+                ))}
+
+                {/* Always offered, never "enrolled in": the confidential pathway
+                    is reached anonymously rather than from this account, so it
+                    is not part of care_programmes (spec §16). */}
+                <ProgrammeCard
+                  href="/private"
+                  accent="sp-gradient-programme"
+                  art={null}
+                  icon="privacy"
+                  title="Confidential Sexual Health Support"
+                  subtitle="Private. Safe. Professional. We're here to help."
+                >
+                  <span className="inline-flex items-center gap-1 text-sm font-semibold text-programme-text">
+                    Continue privately
+                    <Icon name="arrowRight" size={16} />
+                  </span>
+                </ProgrammeCard>
+              </div>
+            }
+          </Card>
+        </div>
+
+        {/* ── Right column ── */}
+        <div className="space-y-4 lg:space-y-6 w-full min-w-0">
+          <Card
+            title="Current Care Recommendation"
+            action={
+              recommendation && (
+                <Link
+                  to="/patient/find-care"
+                  className="text-sm font-semibold text-brand-700 hover:underline"
+                >
+                  View details
+                </Link>
+              )
+            }
+          >
+            {recommendation ? (
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-ink-500">Likely specialty</p>
+                    <p className="font-semibold text-ink-900">
+                      {recommendation.specialty_name ?? recommendation.specialty_code}
+                    </p>
+                  </div>
+                  <UrgencyBadge urgency={recommendation.urgency} />
+                </div>
+                <p className="text-sm text-ink-600">{recommendation.reason}</p>
+                <div className="sp-notice sp-notice-warn flex-col !p-3">
+                  <p className="text-xs font-semibold">
+                    Suggested next step
+                  </p>
+                  <p className="text-sm text-ink-700 mt-0.5">
+                    {recommendation.suggested_next_action}
                   </p>
                 </div>
-                <Link to="/patient/reports" className="sp-btn sp-btn-secondary sp-btn-sm">
-                  View explanation
-                </Link>
+                <Confidence value={recommendation.confidence} />
+                <AiNotice>
+                  AI-generated navigation support based on your reported
+                  information — not a diagnosis.
+                </AiNotice>
               </div>
             ) : (
               <Empty
-                title="No reports yet"
-                hint="Upload a lab report to get a plain-language explanation."
+                title="No active recommendation"
+                hint="Start a symptom check to get guidance."
               />
             )}
           </Card>
-          </div>
-        </div>
 
-        <div className="space-y-4 lg:space-y-6">
-        <Card
-          title="Current Care Recommendation"
-          action={
-            recommendation && (
-              <Link
-                to="/patient/find-care"
-                className="text-sm font-semibold text-brand-700 hover:underline"
-              >
-                View details
+          {/* Screening */}
+          <Card
+            title="Image Screening"
+            subtitle="For your information"
+            action={
+              <Link to="/patient/imaging" className="text-sm font-semibold text-brand-700 hover:underline">
+                View all
               </Link>
-            )
-          }
-        >
-          {recommendation ? (
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs text-ink-500">Likely specialty</p>
-                  <p className="font-semibold text-ink-900">
-                    {recommendation.specialty_name ?? recommendation.specialty_code}
+            }
+          >
+            {data.recent_screening ? (
+              <div className="space-y-3">
+                <p className="text-xs text-ink-500">
+                  {data.recent_screening.modality.replace(/_/g, " ")} ·{" "}
+                  {formatDateTime(data.recent_screening.uploaded_at)}
+                </p>
+                <div className="rounded-xl bg-ink-50 p-3">
+                  <p className="text-xs font-semibold text-ink-700">
+                    Possible finding
+                  </p>
+                  <p className="text-sm text-ink-900 font-medium mt-0.5">
+                    {data.recent_screening.finding_label}
                   </p>
                 </div>
-                <UrgencyBadge urgency={recommendation.urgency} />
+                <Confidence value={data.recent_screening.confidence} />
+                <AiNotice>
+                  AI support only. Review with your doctor for accurate advice.
+                </AiNotice>
               </div>
-              <p className="text-sm text-ink-600">{recommendation.reason}</p>
-              <div className="sp-notice sp-notice-warn flex-col !p-3">
-                <p className="text-xs font-semibold">
-                  Suggested next step
-                </p>
-                <p className="text-sm text-ink-700 mt-0.5">
-                  {recommendation.suggested_next_action}
-                </p>
-              </div>
-              <Confidence value={recommendation.confidence} />
-              <AiNotice>
-                AI-generated navigation support based on your reported
-                information — not a diagnosis.
-              </AiNotice>
-            </div>
-          ) : (
-            <Empty
-              title="No active recommendation"
-              hint="Start a symptom check to get guidance."
-            />
-          )}
-        </Card>
-        {/* Screening */}
-        <Card
-          title="Image Screening"
-          subtitle="For your information"
-          action={
-            <Link to="/patient/imaging" className="text-sm font-semibold text-brand-700 hover:underline">
-              View all
-            </Link>
-          }
-        >
-          {data.recent_screening ? (
-            <div className="space-y-3">
-              <p className="text-xs text-ink-500">
-                {data.recent_screening.modality.replace(/_/g, " ")} ·{" "}
-                {formatDateTime(data.recent_screening.uploaded_at)}
-              </p>
-              <div className="rounded-xl bg-ink-50 p-3">
-                <p className="text-xs font-semibold text-ink-700">
-                  Possible finding
-                </p>
-                <p className="text-sm text-ink-900 font-medium mt-0.5">
-                  {data.recent_screening.finding_label}
-                </p>
-              </div>
-              <Confidence value={data.recent_screening.confidence} />
-              <AiNotice>
-                AI support only. Review with your doctor for accurate advice.
-              </AiNotice>
-            </div>
-          ) : (
-            <Empty title="No screenings yet" hint="Upload a supported medical image." />
-          )}
-        </Card>
+            ) : (
+              <Empty title="No screenings yet" hint="Upload a supported medical image." />
+            )}
+          </Card>
+
+          {/* Recent Activity */}
+          <Card title="Recent Activity">
+            {data.recent_activity?.length ? (
+              <ol className="space-y-3">
+                {data.recent_activity.slice(0, 6).map((item: any, index: number) => (
+                  <li key={index} className="flex gap-3">
+                    <span className="mt-1 h-2 w-2 rounded-full bg-brand-500 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm text-ink-800 truncate">{item.title}</p>
+                      <p className="text-xs text-ink-500">
+                        {formatDateTime(item.at)}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <Empty title="No recent activity" />
+            )}
+          </Card>
         </div>
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
-        {/* Care programmes */}
-        <Card
-          title="Care Programmes"
-          className="lg:col-span-2"
-          action={
-            <Link to="/patient/programmes" className="text-sm font-semibold text-brand-700 hover:underline">
-              View all
-            </Link>
-          }
-        >
-          {
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {!data.care_programmes?.length && (
-                <div className="sm:col-span-2">
-                  <Empty
-                    title="Not enrolled in a care programme"
-                    hint="Maternal and elderly pathways are available."
-                  />
-                </div>
-              )}
-              {data.care_programmes?.map((programme: any) => (
-                <ProgrammeCard
-                  key={programme.id}
-                  to="/patient/programmes"
-                  accent={PROGRAMME_STYLE[programme.type] ?? "sp-gradient-elderly"}
-                  art={programmeIllustration(programme.type)}
-                  title={programme.name}
-                  subtitle={
-                    data.maternal_summary && programme.type === "maternal"
-                      ? `Pregnancy week ${data.maternal_summary.pregnancy_week}`
-                      : "Reminders, check-ins and follow-up."
-                  }
-                >
-                  <div className="h-1.5 rounded-full bg-white/70 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-brand-600"
-                      style={{ width: `${programme.progress_percent}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-ink-500 mt-1.5">
-                    {Math.round(programme.progress_percent)}% complete
-                  </p>
-                </ProgrammeCard>
-              ))}
-
-              {/* Always offered, never "enrolled in": the confidential pathway
-                  is reached anonymously rather than from this account, so it
-                  is not part of care_programmes (spec §16). It carries a shield
-                  rather than artwork — a recognisable sexual-health image is
-                  exactly what someone glancing at a shared phone would notice —
-                  but it keeps the same card shape so it does not read as a
-                  different kind of thing. */}
-              <ProgrammeCard
-                href="/private"
-                accent="sp-gradient-programme"
-                art={null}
-                icon="privacy"
-                title="Confidential Sexual Health Support"
-                subtitle="Private. Safe. Professional. We're here to help."
-              >
-                <span className="inline-flex items-center gap-1 text-sm font-semibold text-programme-text">
-                  Continue privately
-                  <Icon name="arrowRight" size={16} />
-                </span>
-              </ProgrammeCard>
-            </div>
-          }
-        </Card>
-
-        {/* Activity */}
-        <Card title="Recent Activity">
-          {data.recent_activity?.length ? (
-            <ol className="space-y-3">
-              {data.recent_activity.slice(0, 6).map((item: any, index: number) => (
-                <li key={index} className="flex gap-3">
-                  <span className="mt-1 h-2 w-2 rounded-full bg-brand-500 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm text-ink-800 truncate">{item.title}</p>
-                    <p className="text-xs text-ink-500">
-                      {formatDateTime(item.at)}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <Empty title="No recent activity" />
-          )}
-        </Card>
       </div>
 
       {/* Medication reminders */}
