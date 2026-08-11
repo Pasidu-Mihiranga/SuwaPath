@@ -112,7 +112,11 @@ export function Card({
   bodyClassName?: string;
 }) {
   return (
-    <section className={`sp-card ${className}`}>
+    /* A column whose body grows: side-by-side cards are stretched to the
+       tallest in their grid row, and without this the extra height collects
+       as dead space under the shorter card's content instead of being space
+       the body can centre itself in. */
+    <section className={`sp-card flex flex-col ${className}`}>
       {(title || action) && (
         <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 p-4 sm:p-5 pb-0 sm:pb-0">
           <div className="flex items-start gap-2.5 min-w-0">
@@ -138,7 +142,7 @@ export function Card({
           {action && <div className="shrink-0">{action}</div>}
         </header>
       )}
-      <div className={`p-4 sm:p-5 ${bodyClassName}`}>{children}</div>
+      <div className={`flex-1 p-4 sm:p-5 ${bodyClassName}`}>{children}</div>
     </section>
   );
 }
@@ -247,7 +251,11 @@ export function Empty({
   action?: ReactNode;
 }) {
   return (
-    <div className="text-center py-10 px-4">
+    /* Centred in whatever height it is given, so two empty cards side by side
+       show their icon and message on the same line rather than each starting
+       at its own header. The min-height keeps a lone empty card from
+       collapsing to something smaller than a filled one. */
+    <div className="flex h-full min-h-[11rem] flex-col items-center justify-center text-center py-10 px-4">
       <span className="sp-icon-tile mx-auto bg-ink-100 text-ink-400 !h-12 !w-12">
         <Icon name={icon} size={24} />
       </span>
