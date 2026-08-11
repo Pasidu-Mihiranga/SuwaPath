@@ -358,6 +358,8 @@ export function Imaging() {
                 {selected.analysis.finding_description}
               </p>
 
+              <ImageFeatures analysis={selected.analysis} />
+
               <div className="rounded-xl bg-brand-50 border border-brand-200 p-3">
                 <p className="text-xs font-semibold text-brand-900">
                   Suggested next step
@@ -429,6 +431,73 @@ export function Imaging() {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+/**
+ * What the screening actually measured, and where the decision boundary sits.
+ *
+ * A bare probability is unreadable and unfalsifiable — a reader can neither
+ * agree nor disagree with "0.82". The underlying quantities are what let a
+ * clinician say "the asymmetry is doing the work here, and that is a rotation
+ * artefact". Adapters that cannot decompose their output return no
+ * measurements and this renders nothing.
+ */
+function ImageFeatures({ analysis }: { analysis: any }) {
+  const measurements: any[] = analysis.measurements ?? [];
+  if (measurements.length === 0) return null;
+
+  // Contributions are signed log-odds terms, so scale bars by the largest
+  // magnitude present rather than by a fixed maximum: a feature arguing
+  // against the finding is as informative as one arguing for it.
+  const peak = Math.max(
+    ...measurements.map((m) => Math.abs(Number(m.contribution) || 0)),
+    0.001,
+  );
+  const probability = analysis.class_probabilities?.pneumonia;
+  const threshold = analysis.decision_threshold;
+
+  return (
+    <div className="rounded-xl border border-line p-3">
+      <p className="text-xs font-semibold text-ink-900">What the model measured</p>
+      <p className="text-xs text-ink-500 mt-0.5">
+        Radiographic features computed from the pixels, and how much each moved
+        the score.
+      </p>
+
+      <div className="mt-3 space-y-2.5">
+        {measurements.map((m) => {
+          const contribution = Number(m.contribution) || 0;
+          const width = (Math.abs(contribution) / peak) * 100;
+          return (
+            <div key={m.code}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm text-ink-800">{m.label}</span>
+                <span className="text-xs tabular-nums text-ink-500">
+                  {Number(m.value).toFixed(3)}
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 rounded-full bg-surface overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${contribution >= 0 ? "bg-brand-500" : "bg-ink-300"}`}
+                  style={{ width: `${width}%` }}
+                />
+              </div>
+              <p className="mt-1 text-xs text-ink-500">{m.detail}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {typeof probability === "number" && typeof threshold === "number" && (
+        <p className="mt-3 border-t border-line pt-2 text-xs text-ink-500">
+          Score {probability.toFixed(3)} against a decision threshold of{" "}
+          {threshold.toFixed(3)}.
+          {threshold < 0.4 &&
+            " Tuned for sensitivity, so it raises more false alarms by design."}
+        </p>
+      )}
     </div>
   );
 }

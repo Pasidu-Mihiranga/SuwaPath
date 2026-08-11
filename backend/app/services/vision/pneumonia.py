@@ -175,6 +175,7 @@ def _build_result(
     score_fn,
     started: float,
     score_batch_fn=None,
+    measurements: list[dict] | None = None,
 ) -> InferenceResult:
     prob_normal = 1.0 - prob_pneumonia
 
@@ -237,6 +238,8 @@ def _build_result(
         model_name=adapter.model_name,
         model_version=adapter.model_version,
         is_trained_model=adapter.is_trained_model,
+        measurements=measurements or [],
+        decision_threshold=round(float(threshold), 4),
     )
 
 
@@ -537,12 +540,40 @@ class BaselinePneumoniaAdapter(ModelAdapter):
         # usually exposure rather than disease. TEXTURE_BASELINE is the block
         # variation a structurally normal film already shows.
         TEXTURE_BASELINE = 0.15
-        raw = (
-            10.0 * opacity
-            + 12.0 * asymmetry
-            + 6.0 * (heterogeneity - TEXTURE_BASELINE)
-            - 1.4
-        )
+        contributions = {
+            "opacity": 10.0 * opacity,
+            "asymmetry": 12.0 * asymmetry,
+            "heterogeneity": 6.0 * (heterogeneity - TEXTURE_BASELINE),
+        }
+        raw = sum(contributions.values()) - 1.4
+
+        # Kept for the next `predict` to read. The occlusion sweep calls
+        # `_score` sixty-five times, so this is overwritten constantly — only
+        # the value from the full-image call is ever published, and `predict`
+        # reads it immediately after that call and before the sweep starts.
+        self._last_measurements = [
+            {
+                "code": "lower_zone_opacity",
+                "label": "Lower-zone opacity",
+                "detail": "Mean density of the lower lung fields against the upper zones.",
+                "value": round(opacity, 4),
+                "contribution": round(contributions["opacity"], 3),
+            },
+            {
+                "code": "lateral_asymmetry",
+                "label": "Left/right asymmetry",
+                "detail": "Density difference between lower lung fields, skipping the mediastinum.",
+                "value": round(asymmetry, 4),
+                "contribution": round(contributions["asymmetry"], 3),
+            },
+            {
+                "code": "texture_heterogeneity",
+                "label": "Texture heterogeneity",
+                "detail": "Block-wise variation across a 6×6 grid, above the variation a normal film shows.",
+                "value": round(heterogeneity, 4),
+                "contribution": round(contributions["heterogeneity"], 3),
+            },
+        ]
         return float(1.0 / (1.0 + np.exp(-raw)))
 
     def predict(
@@ -550,6 +581,9 @@ class BaselinePneumoniaAdapter(ModelAdapter):
     ) -> InferenceResult:
         started = time.perf_counter()
         probability = self._score(image)
+        # Read before `_build_result`, because the occlusion sweep inside it
+        # calls `_score` on 65 masked copies and overwrites this each time.
+        measurements = list(getattr(self, "_last_measurements", []))
         return _build_result(
             prob_pneumonia=probability,
             adapter=self,
@@ -558,4 +592,5 @@ class BaselinePneumoniaAdapter(ModelAdapter):
             score_fn=self._score,
             score_batch_fn=getattr(self, "_score_batch", None),
             started=started,
+            measurements=measurements,
         )

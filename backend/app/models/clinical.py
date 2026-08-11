@@ -359,6 +359,16 @@ class ImageAnalysis(Base, TimestampMixin):
     confidence: Mapped[float] = mapped_column(Float)
     # Per-class probabilities, e.g. {"normal": 0.16, "pneumonia": 0.84}
     class_probabilities: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # What the model measured to reach that probability, when it can say —
+    # each entry a code, a label, the measured value and its contribution to
+    # the score. Persisted rather than recomputed because the image may be
+    # deleted while the analysis is kept, and because a stored result must
+    # keep showing the reasoning it was actually produced by.
+    measurements: Mapped[list] = mapped_column(JSONB, default=list)
+    # The boundary this result was judged against. Stored per row: a screening
+    # model retuned for sensitivity later must not silently reinterpret
+    # results decided under the old operating point.
+    decision_threshold: Mapped[float | None] = mapped_column(Float)
     is_uncertain: Mapped[bool] = mapped_column(Boolean, default=False)
     uncertainty_note: Mapped[str | None] = mapped_column(Text)
 

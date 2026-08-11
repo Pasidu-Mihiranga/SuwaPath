@@ -42,6 +42,14 @@ class InferenceResult:
     model_name: str = ""
     model_version: str = "1.0.0"
     is_trained_model: bool = True
+    # What the model actually measured, when it can say. A probability alone
+    # is unreadable and unfalsifiable; a reader who can see the underlying
+    # quantities can disagree with the score for a stated reason. Adapters
+    # that cannot decompose their output leave this empty.
+    measurements: list[dict] = field(default_factory=list)
+    # The decision boundary this result was judged against, so a screening
+    # tuned for sensitivity is visibly tuned for sensitivity.
+    decision_threshold: float | None = None
 
 
 class ModelAdapter(ABC):
