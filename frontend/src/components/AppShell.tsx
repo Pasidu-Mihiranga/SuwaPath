@@ -95,6 +95,7 @@ export default function AppShell() {
   const location = useLocation();
   const [unread, setUnread] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -105,8 +106,11 @@ export default function AppShell() {
       .catch(() => undefined);
   }, [location.pathname]);
 
-  // Close the drawer whenever navigation happens.
-  useEffect(() => setDrawerOpen(false), [location.pathname]);
+  // Close the drawer & plus menu whenever navigation happens.
+  useEffect(() => {
+    setDrawerOpen(false);
+    setPlusMenuOpen(false);
+  }, [location.pathname]);
 
   // Prevent the page behind the drawer from scrolling.
   useEffect(() => {
@@ -119,7 +123,6 @@ export default function AppShell() {
   if (!user) return null;
 
   const items = NAV[user.role];
-  const tabs = items.filter((item) => item.tab).slice(0, 5);
   const sections = [...new Set(items.map((item) => item.section ?? ""))];
   const home = ROLE_HOME[user.role];
   // Routes that manage their own viewport rather than sitting in the
@@ -157,7 +160,7 @@ export default function AppShell() {
   );
 
   return (
-    <div className={`flex ${fullBleed ? "h-screen w-screen overflow-hidden" : "min-h-screen"}`}>
+    <div className={`flex w-full ${fullBleed ? "h-screen overflow-hidden" : "min-h-screen"}`}>
       {/* ------------------------------------------------ desktop sidebar */}
       {!fullBleed && (
         <aside className="hidden lg:flex w-sidebar shrink-0 flex-col border-r border-line bg-surface lg:sticky lg:top-0 lg:h-screen">
@@ -234,21 +237,15 @@ export default function AppShell() {
       )}
 
       {/* ------------------------------------------------------- main area */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+      <div className="flex-1 min-w-0 w-full flex flex-col min-h-0 overflow-x-hidden">
         {/* Translucent rather than near-opaque, so content scrolling beneath
             reads through the bar instead of disappearing under a flat panel.
             supports-[]: keeps it solid where backdrop-filter is unavailable —
             otherwise the bar would go see-through with nothing blurring it. */}
         {!fullBleed && (
-          <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/70">
+          <header className="fixed top-0 right-0 left-0 lg:left-64 z-30 h-topbar border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/90 shadow-sm">
             <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
-              <button
-                className="lg:hidden sp-btn sp-btn-ghost !px-2"
-                onClick={() => setDrawerOpen(true)}
-              >
-                <Icon name="menu" size={22} label="Open menu" />
-              </button>
-              <Link to={home} className="lg:hidden" aria-label="SuwaPath home">
+              <Link to={home} aria-label="SuwaPath home">
                 <Brand variant="mark" />
               </Link>
 
@@ -364,36 +361,180 @@ export default function AppShell() {
           className={
             fullBleed
               ? "flex-1 min-h-0 w-full h-screen overflow-hidden"
-              : "flex-1 min-w-0 p-3 sm:p-4 lg:p-8 pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
+              : "flex-1 min-w-0 p-3 sm:p-4 lg:p-8 pt-[calc(var(--sp-topbar-h)+0.75rem)] sm:pt-[calc(var(--sp-topbar-h)+1rem)] pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
           }
         >
           <Outlet />
         </main>
       </div>
 
-      {/* --------------------------------------------- mobile bottom tabs */}
+      {/* ── Mobile Plus (+) Quick Action Sheet ── */}
+      {plusMenuOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[50] bg-ink-900/20 transition-opacity"
+            onClick={() => setPlusMenuOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            className="
+              fixed z-[60]
+              bottom-[calc(var(--sp-bottomnav-h)+0.75rem)] inset-x-3
+              sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-[24rem]
+              rounded-3xl border border-line bg-surface p-5
+              shadow-[0_20px_60px_rgba(0,0,0,0.22)] ring-1 ring-ink-900/10
+              animate-[fabSlideUp_250ms_cubic-bezier(0.16,1,0.3,1)]
+            "
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <h2 className="text-xs font-bold text-ink-700 uppercase tracking-wider">Quick Actions</h2>
+              <button
+                onClick={() => setPlusMenuOpen(false)}
+                className="grid h-7 w-7 place-items-center rounded-full bg-ink-100 text-ink-600 hover:bg-ink-200"
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-y-5 gap-x-3">
+              {/* 1. AI Assistant */}
+              <button
+                onClick={() => {
+                  setPlusMenuOpen(false);
+                  window.dispatchEvent(new CustomEvent("toggle-chat-fab"));
+                }}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-600 text-white shadow-md shadow-brand-600/20 group-hover:scale-105 transition-transform">
+                  <Icon name="ai" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">AI Assistant</span>
+              </button>
+
+              {/* 2. Image Screening */}
+              <Link
+                to="/patient/imaging"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-purple-50 text-purple-600 border border-purple-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="scan" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Image Screening</span>
+              </Link>
+
+              {/* 3. Care Programmes */}
+              <Link
+                to="/patient/programmes"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-pink-50 text-pink-600 border border-pink-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="favorite" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Care Programmes</span>
+              </Link>
+
+              {/* 4. Medical History */}
+              <Link
+                to="/patient/history"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-amber-50 text-amber-600 border border-amber-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="history" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Medical History</span>
+              </Link>
+
+              {/* 5. Sharing & Consent */}
+              <Link
+                to="/patient/sharing"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="lock" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Sharing & Consent</span>
+              </Link>
+
+              {/* 6. Medical Reports */}
+              <Link
+                to="/patient/reports"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="description" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Medical Reports</span>
+              </Link>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* --------------------------------------------- mobile bottom tabs (5 sections) */}
       {!fullBleed && (
         <nav className="sp-tabbar lg:hidden" aria-label="Primary">
-          {tabs.map((tab) => (
-            <NavLink
-              key={tab.to}
-              to={tab.to}
-              end={tab.end}
-              className={({ isActive }) =>
-                `sp-tab ${isActive ? "sp-tab-active" : ""}`
-              }
-            >
-              <span className="relative">
-                <Icon name={tab.icon} size={22} />
-                {tab.icon === "notifications" && unread > 0 && (
-                  <span className="absolute -top-1 -right-1.5 min-w-[15px] h-[15px] rounded-full bg-danger-text text-white text-[9px] font-bold grid place-items-center px-1">
-                    {unread > 9 ? "9+" : unread}
-                  </span>
-                )}
-              </span>
-              {tab.short ?? tab.label}
-            </NavLink>
-          ))}
+          {/* Tab 1: Home */}
+          <NavLink
+            to="/patient"
+            end
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="home" size={22} />
+            <span className="truncate w-full text-center">Home</span>
+          </NavLink>
+
+          {/* Tab 2: Visits */}
+          <NavLink
+            to="/patient/appointments"
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="calendar" size={22} />
+            <span className="truncate w-full text-center">Visits</span>
+          </NavLink>
+
+          {/* Tab 3 (CENTER): Plus (+) Quick Action Menu */}
+          <button
+            type="button"
+            onClick={() => setPlusMenuOpen(!plusMenuOpen)}
+            className="sp-tab flex flex-col items-center justify-center shrink-0 min-w-0 px-1"
+            title="More Options & Actions"
+          >
+            <span className="grid h-12 w-12 sm:h-13 sm:w-13 place-items-center rounded-full bg-brand-600 text-white shadow-xl shadow-brand-600/40 border-2 border-surface -mt-4 transition active:scale-95">
+              <Icon
+                name="add"
+                size={28}
+                className={`transition-transform duration-[1800ms] ease-in-out ${
+                  plusMenuOpen ? "rotate-[360deg]" : "rotate-0"
+                }`}
+              />
+            </span>
+            <span className="truncate w-full text-center text-[11px] font-bold text-brand-700 mt-0.5">
+              More
+            </span>
+          </button>
+
+          {/* Tab 4: Find Care */}
+          <NavLink
+            to="/patient/find-care"
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="hospital" size={22} />
+            <span className="truncate w-full text-center">Find Care</span>
+          </NavLink>
+
+          {/* Tab 5: Reports */}
+          <NavLink
+            to="/patient/reports"
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="description" size={22} />
+            <span className="truncate w-full text-center">Reports</span>
+          </NavLink>
         </nav>
       )}
 

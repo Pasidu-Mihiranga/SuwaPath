@@ -92,29 +92,33 @@ export function Reports() {
             {items.map((item) => (
               <button
                 key={item.id}
-                className="w-full text-left py-3.5 flex items-center gap-4 hover:bg-ink-50 -mx-2 px-2 rounded-lg transition"
+                className="w-full text-left py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:bg-ink-50 -mx-2 px-2 rounded-lg transition"
                 onClick={async () => {
                   const { data } = await api.get(`/documents/${item.id}`);
                   setSelected(data);
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
               >
-                <span className="sp-icon-tile bg-brand-50 text-brand-700"><Icon name="description" size={20} /></span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-ink-900 truncate">
-                    {item.file_name}
-                  </p>
-                  <p className="text-xs text-ink-500">
-                    {formatDateTime(item.uploaded_at)} ·{" "}
-                    {item.document_type.replace(/_/g, " ")}
-                  </p>
+                <div className="flex items-start gap-3 min-w-0 flex-1 w-full">
+                  <span className="sp-icon-tile bg-brand-50 text-brand-700 shrink-0"><Icon name="description" size={20} /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-ink-900 break-words">
+                      {item.file_name}
+                    </p>
+                    <p className="text-xs text-ink-500 mt-0.5">
+                      {formatDateTime(item.uploaded_at)} ·{" "}
+                      {item.document_type.replace(/_/g, " ")}
+                    </p>
+                  </div>
                 </div>
                 {item.abnormal_count > 0 ? (
-                  <span className="sp-chip sp-chip-warn">
+                  <span className="sp-chip sp-chip-warn shrink-0 pl-11 sm:pl-0">
                     {item.abnormal_count} to review
                   </span>
                 ) : (
-                  <StatusChip value={item.processing_status} />
+                  <div className="shrink-0 pl-11 sm:pl-0">
+                    <StatusChip value={item.processing_status} />
+                  </div>
                 )}
               </button>
             ))}
@@ -404,25 +408,29 @@ export function Imaging() {
             {items.map((item) => (
               <button
                 key={item.id}
-                className="w-full text-left py-3.5 flex items-center gap-4 hover:bg-ink-50 -mx-2 px-2 rounded-lg transition"
+                className="w-full text-left py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:bg-ink-50 -mx-2 px-2 rounded-lg transition"
                 onClick={async () => {
                   const { data } = await api.get(`/images/${item.id}`);
                   setSelected(data);
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
               >
-                <span className="sp-icon-tile bg-programme-surface text-programme-text"><Icon name="scan" size={20} /></span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-ink-900">
-                    {item.analysis?.finding_label ?? item.file_name}
-                  </p>
-                  <p className="text-xs text-ink-500">
-                    {item.modality.replace(/_/g, " ")} ·{" "}
-                    {formatDateTime(item.uploaded_at)}
-                  </p>
+                <div className="flex items-start gap-3 min-w-0 flex-1 w-full">
+                  <span className="sp-icon-tile bg-programme-surface text-programme-text shrink-0"><Icon name="scan" size={20} /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-ink-900 break-words">
+                      {item.analysis?.finding_label ?? item.file_name}
+                    </p>
+                    <p className="text-xs text-ink-500 mt-0.5">
+                      {item.modality.replace(/_/g, " ")} ·{" "}
+                      {formatDateTime(item.uploaded_at)}
+                    </p>
+                  </div>
                 </div>
                 {item.analysis && (
-                  <Confidence value={item.analysis.confidence} />
+                  <div className="shrink-0 pl-11 sm:pl-0">
+                    <Confidence value={item.analysis.confidence} />
+                  </div>
                 )}
               </button>
             ))}

@@ -233,6 +233,15 @@ export default function ChatFab() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, busy]);
 
+  // Listen for toggle-chat-fab event from bottom nav bar.
+  useEffect(() => {
+    function handleToggle() {
+      setOpen((prev) => !prev);
+    }
+    window.addEventListener("toggle-chat-fab", handleToggle);
+    return () => window.removeEventListener("toggle-chat-fab", handleToggle);
+  }, []);
+
   // Focus the input when the popup opens.
   useEffect(() => {
     if (open) {
@@ -413,15 +422,14 @@ export default function ChatFab() {
       {open && (
         <div
           className="
-            fixed z-[60] w-[23.5rem] max-w-[calc(100vw-2rem)]
-            bottom-[5.5rem] right-4 lg:bottom-24 lg:right-8
-            flex flex-col rounded-2xl border border-line bg-surface
-            shadow-[0_20px_50px_rgba(0,0,0,0.18)] ring-1 ring-ink-900/5
+            fixed z-[60] inset-0 w-full h-full rounded-none border-0 bg-surface
+            sm:inset-auto sm:bottom-20 sm:right-4 sm:w-[24rem] sm:max-w-[calc(100vw-2rem)] sm:h-[min(34rem,calc(100vh-7rem))] sm:rounded-2xl sm:border sm:border-line
+            lg:bottom-24 lg:right-8
+            flex flex-col
+            shadow-2xl ring-1 ring-ink-900/5
             animate-[fabSlideUp_200ms_ease-out]
-            max-h-[min(32rem,calc(100vh-8rem))]
             overflow-hidden
           "
-          style={{ height: "min(32rem, calc(100vh - 8rem))" }}
         >
           {/* Header */}
           <div className="flex items-center gap-2 border-b border-line bg-brand-600 px-4 py-3 shrink-0">
@@ -668,16 +676,16 @@ export default function ChatFab() {
         />
       )}
 
-      {/* ── FAB button ── */}
+      {/* ── Desktop FAB button ── */}
       <button
         onClick={() => setOpen(!open)}
         aria-label={open ? "Close assistant" : "Open assistant"}
         className={`
-          fixed z-[60] grid h-13 w-13 sm:h-14 sm:w-14 place-items-center rounded-full shadow-xl
+          hidden lg:grid fixed z-[60] h-14 w-14 place-items-center rounded-full shadow-xl
           transition-all duration-200 hover:scale-105 active:scale-95
           ${open
-            ? "bg-ink-800 text-white bottom-4 right-4 lg:bottom-6 lg:right-8"
-            : "bg-brand-600 text-white bottom-20 right-4 lg:bottom-8 lg:right-8"
+            ? "bg-ink-800 text-white bottom-6 right-8"
+            : "bg-brand-600 text-white bottom-8 right-8"
           }
         `}
         title="Chat with SuwaPath Assistant"
