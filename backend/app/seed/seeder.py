@@ -327,11 +327,15 @@ def seed_care_programmes(db: Session) -> dict[str, CareProgramme]:
     programmes = [
         CareProgramme(
             code="maternal_care",
-            name="Maternal & Postpartum Care",
+            # Not "Maternal & Postpartum Care". Every milestone below is
+            # antenatal (weeks 12–38), and the word "Postpartum" collided with
+            # the separate postpartum programme underneath it — two adjacent
+            # cards both saying "Postpartum" read as a duplicate.
+            name="Pregnancy & Antenatal Care",
             programme_type=ProgrammeType.MATERNAL,
             description=(
-                "Pregnancy monitoring, antenatal visit reminders, warning-sign "
-                "check-ins and postpartum recovery support."
+                "Pregnancy monitoring, antenatal visit reminders, scan and "
+                "test milestones, and warning-sign check-ins."
             ),
             milestones=[
                 {"week": 12, "label": "First trimester scan", "test": "usg_obstetric"},
@@ -349,11 +353,11 @@ def seed_care_programmes(db: Session) -> dict[str, CareProgramme]:
         ),
         CareProgramme(
             code="postpartum_care",
-            name="Postpartum & Newborn Care",
+            name="After Birth & Newborn Care",
             programme_type=ProgrammeType.POSTPARTUM,
             description=(
-                "Maternal recovery, feeding support, mental-wellbeing screening "
-                "and newborn follow-up including vaccination reminders."
+                "Recovery after delivery, feeding support, mental-wellbeing "
+                "screening, and newborn checks and vaccination reminders."
             ),
             milestones=[
                 {"day": 3, "label": "Newborn first review", "test": None},
