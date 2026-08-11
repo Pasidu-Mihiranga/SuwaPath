@@ -1,13 +1,4 @@
----
-title: SuwaPath API
-emoji: 🩺
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
-pinned: false
-short_description: AI healthcare navigation for Sri Lanka — API service
----
+
 
 <div align="center">
 
