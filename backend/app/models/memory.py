@@ -35,7 +35,12 @@ from app.models.base import Base, TimestampMixin, new_uuid
 
 
 class MemoryKind:
-    """What sort of thing a fact is. Plain strings — see the enum note in LOG.md."""
+    """What sort of thing a remembered fact is.
+
+    Plain string constants rather than a database enum. The set is expected to
+    grow as the assistant learns to notice more, and a stored enum turns each
+    addition into a migration on a column nothing queries by type.
+    """
 
     PROFILE = "profile"        # stable: occupation, lives alone, no transport
     CLINICAL = "clinical"      # allergy, chronic condition, past procedure
