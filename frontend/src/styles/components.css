@@ -15,7 +15,9 @@
     box-shadow: var(--sp-shadow-sm);
     transition: box-shadow var(--sp-transition-lift),
       border-color var(--sp-transition);
+    width: 100%;
     max-width: 100%;
+    box-sizing: border-box;
     overflow-wrap: break-word;
   }
   /* Opt-in on cards that are actually actionable. A card that lifts but
@@ -376,7 +378,7 @@
     color: var(--sp-ink-400);
   }
 
-  /* Mobile bottom tab bar. */
+  /* Mobile bottom tab bar with curved shape and depth shadow. */
   .sp-tabbar {
     position: fixed;
     inset-inline: 0;
@@ -388,6 +390,9 @@
     padding-bottom: env(safe-area-inset-bottom);
     background: var(--sp-surface);
     border-top: 1px solid var(--sp-border);
+    border-top-left-radius: 1.5rem;
+    border-top-right-radius: 1.5rem;
+    box-shadow: 0 -4px 20px rgba(10, 46, 86, 0.08);
   }
   .sp-tab {
     flex: 1;
@@ -396,17 +401,27 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.2rem;
+    gap: 0.15rem;
     font-size: 0.6875rem;
     font-weight: 500;
     color: var(--sp-ink-500);
+    padding-block: 0.35rem;
     padding-inline: 0.25rem;
+    margin-block: 0.25rem;
+    margin-inline: 0.15rem;
+    border-radius: 0.85rem;
     text-align: center;
-    transition: color var(--sp-transition);
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .sp-tab-active {
     color: var(--sp-brand-700);
-    font-weight: 600;
+    font-weight: 700;
+    background: var(--sp-brand-50, #e6f7f9);
+  }
+  .sp-tab-active svg {
+    color: var(--sp-brand-700);
+    transform: scale(1.12);
+    transition: transform 0.2s ease;
   }
 
   /* -------------------------------------------------------------- tokens */
