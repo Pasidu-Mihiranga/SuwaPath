@@ -79,8 +79,7 @@ export default function FindCare() {
       <header>
         <h1 className="text-2xl font-bold text-ink-900">Find Care</h1>
         <p className="text-ink-500">
-          Matched on specialty, availability, distance and — critically — whether
-          the facility can run the tests you may need.
+          Matched on specialty, availability, distance, and whether the facility can run the tests you need.
         </p>
       </header>
 
@@ -114,12 +113,12 @@ export default function FindCare() {
 
       {/* Tabs + filters */}
       <div className="sp-card p-4 space-y-3">
-        <div className="flex gap-1 border-b border-ink-100 -mx-4 px-4 -mt-4 pt-1">
+        <div className="flex gap-1 border-b border-ink-100 -mx-4 px-4 -mt-4 pt-1 overflow-x-auto no-scrollbar">
           {TABS.map((entry) => (
             <button
               key={entry.key}
               onClick={() => setTab(entry.key)}
-              className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition ${
+              className={`px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 whitespace-nowrap transition ${
                 tab === entry.key
                   ? "border-brand-600 text-brand-700"
                   : "border-transparent text-ink-500 hover:text-ink-800"
@@ -130,9 +129,9 @@ export default function FindCare() {
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 w-full min-w-0">
           <select
-            className="sp-select w-auto py-2"
+            className="sp-select w-full py-2 min-w-0"
             value={specialty}
             onChange={(event) => setSpecialty(event.target.value)}
           >
@@ -148,7 +147,7 @@ export default function FindCare() {
 
           {tab === "doctors" && (
             <select
-              className="sp-select w-auto py-2"
+              className="sp-select w-full py-2 min-w-0"
               value={visitType}
               onChange={(event) => setVisitType(event.target.value)}
             >
@@ -159,7 +158,7 @@ export default function FindCare() {
           )}
 
           <select
-            className="sp-select w-auto py-2"
+            className="sp-select w-full py-2 min-w-0"
             value={maxDistance}
             onChange={(event) => setMaxDistance(event.target.value)}
           >
