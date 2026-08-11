@@ -1,0 +1,13 @@
+suwapath.pasidumihiranga.me {
+	handle /api/* /docs* /redoc* /openapi.json /health {
+		reverse_proxy backend:7860
+	}
+
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+
+	encode gzip
+}

@@ -1,0 +1,65 @@
+# Production stack for the VPS. Lives at /opt/suwapath/docker-compose.yml.
+#
+# Only Caddy publishes host ports (80/443). Postgres, Qdrant and the backend
+# are reachable only on this compose's internal network, so there is nothing
+# else on the box to firewall.
+#
+# /opt/suwapath/.env holds POSTGRES_*, DATABASE_URL, JWT_SECRET,
+# SUWAPATH_ENCRYPTION_KEY etc. It is written once during provisioning and is
+# never touched by CI or committed to git.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    restart: unless-stopped
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  backend:
+    image: ghcr.io/pasidu-mihiranga/suwapath-api:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - backend_storage:/home/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv/frontend:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  qdrant_storage:
+  backend_storage:
+  caddy_data:
+  caddy_config:
