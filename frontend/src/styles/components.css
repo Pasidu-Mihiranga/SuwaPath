@@ -15,6 +15,8 @@
     box-shadow: var(--sp-shadow-sm);
     transition: box-shadow var(--sp-transition-lift),
       border-color var(--sp-transition);
+    max-width: 100%;
+    overflow-wrap: break-word;
   }
   /* Opt-in on cards that are actually actionable. A card that lifts but
      does nothing when clicked is a lie about affordance. */
@@ -389,14 +391,17 @@
   }
   .sp-tab {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.25rem;
+    gap: 0.2rem;
     font-size: 0.6875rem;
     font-weight: 500;
     color: var(--sp-ink-500);
+    padding-inline: 0.25rem;
+    text-align: center;
     transition: color var(--sp-transition);
   }
   .sp-tab-active {
