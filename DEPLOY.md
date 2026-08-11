@@ -84,11 +84,32 @@ into GHCR with its own short-lived `GITHUB_TOKEN` over SSH, on every run.
 ```bash
 ssh deploy@159.65.1.78
 cd /opt/suwapath
-docker compose exec backend python -m app.seed.seeder --reset   # once
+docker compose exec backend python -m app.seed.seeder --reset      # once
+docker compose exec backend python -m app.seed.demo_journeys       # then this
 ```
 
 `--reset` truncates every table — safe on an empty database, destructive on a
 live one. Run it once, not on every deploy.
+
+**The second command is not optional if anyone is going to look at the demo
+accounts.** The seeder builds the hospital — patients, doctors, appointments,
+medications, check-ins — but it creates no recommendations, no uploaded
+reports and no image screenings, because in the real product those exist only
+after a patient has *used* it. Seed alone and `patient@suwapath.lk` signs in
+to six empty cards.
+
+`demo_journeys` fills that in by driving the live API the way a patient would:
+it uploads the sample lab report and chest X-ray from `storage/samples/` and
+runs a symptom conversation. Everything it creates therefore comes out of the
+real OCR, red-flag and navigation pipelines rather than being written straight
+into the tables — demo data the product could not itself produce would be
+misleading. It needs the API up, skips accounts that already look populated,
+and is safe to re-run.
+
+One honest limitation: a symptom conversation only concludes when the history
+gives the engine enough to assess, so the gentler scripted histories stop at
+the question stage and the recommendation on those accounts comes from the
+uploaded report instead. The dashboards are populated either way.
 
 ### Checks
 
