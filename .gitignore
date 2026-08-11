@@ -36,3 +36,13 @@ models/**/*.pth
 # Separate git repos vendored alongside, not part of SuwaPath
 aee-capstone/
 BioFusion/
+
+# Working documents, kept local.
+#
+# The repository is read by reviewers, so it carries what explains the
+# software — README, ARCHITECTURE, DEPLOY — and not the notes we kept while
+# building it. LOG.md is a development diary, and DEMO/VIDEO_SCRIPT are
+# recording aids; none of them help someone read or run the code.
+LOG.md
+DEMO.md
+VIDEO_SCRIPT.md
