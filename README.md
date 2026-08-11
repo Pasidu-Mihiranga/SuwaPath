@@ -81,7 +81,7 @@ demand forecast. It is one workflow, not five dashboards.
 |---|---|
 | **One assistant, not three screens** | Symptoms, reports, appointments and the confidential pathway are a single conversation. It takes a history the way a doctor does — up to four targeted questions — before it says anything. |
 | **Multilingual symptom intake** | Conversational triage in **English, Sinhala and Tamil**. Sinhala input fires the exact same clinical rules as English — matching is on concepts, not translated strings. |
-| **Deterministic red-flag engine** | 24 clinician-style rules decide urgency. **The LLM never does.** Chest pain + breathlessness + sweating → `EMERGENCY`, every time, in any language. |
+| **Deterministic red-flag engine** | 23 clinician-style rules decide urgency. **The LLM never does.** Chest pain + breathlessness + sweating → `EMERGENCY`, every time, in any language. |
 | **Capability-aware matching** | The differentiator. Not just "a dermatologist near you", but a dermatologist at a facility that can perform the **skin biopsy** the recommendation calls for. |
 | **Medical report understanding** | OCR reads lab PDFs and photographed scans, preserves table row structure, and flags values against **the reference range printed on your own report**. |
 | **Medical image screening** | Chest X-ray screening with confidence, an occlusion-sensitivity heatmap, and a hand-off into care navigation. Pluggable adapters for future models. |
@@ -118,7 +118,7 @@ answer:
 
 ```mermaid
 flowchart TB
-    T["Everything the patient<br/>has said so far"]:::role --> RF["red-flag engine<br/>24 rules, no model call"]:::det
+    T["Everything the patient<br/>has said so far"]:::role --> RF["red-flag engine<br/>23 rules, no model call"]:::det
     RF --> Q{"emergency?"}:::det
     Q -->|yes| ESC["Escalate now.<br/>Stop asking questions."]:::stop
     Q -->|no| E{"enough history?"}:::det
