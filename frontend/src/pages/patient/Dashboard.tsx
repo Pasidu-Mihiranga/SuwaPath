@@ -85,13 +85,13 @@ function ProgrammeCard({
           )
         )}
       </div>
-      <p className="font-semibold text-ink-900">{title}</p>
-      {subtitle && <p className="mt-1 text-sm text-ink-600">{subtitle}</p>}
-      <div className="mt-auto pt-3">{children}</div>
+      <p className="font-semibold text-ink-900 break-words">{title}</p>
+      {subtitle && <p className="mt-1 text-sm text-ink-600 break-words">{subtitle}</p>}
+      <div className="mt-auto pt-3 w-full min-w-0">{children}</div>
     </>
   );
 
-  const className = `flex h-full flex-col overflow-hidden rounded-lg border p-4 transition hover:shadow-md ${accent}`;
+  const className = `flex h-full flex-col overflow-hidden rounded-lg border p-4 transition hover:shadow-md min-w-0 w-full ${accent}`;
 
   return href ? (
     <a href={href} className={className}>
@@ -122,7 +122,7 @@ export default function PatientDashboard() {
   const recommendation = data.current_recommendation;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full min-w-0 max-w-full">
       {/* Welcome + primary action */}
       {/* Suggestions the system prepared without being asked. First on the
           page because they are the only thing here awaiting a decision. */}
@@ -133,58 +133,50 @@ export default function PatientDashboard() {
           of empty space under the short hero next to the long recommendation.
           As columns each side flows at its own pace and the cards below move
           up into the space instead of starting beneath it. */}
-      <div className="grid lg:grid-cols-3 gap-4 lg:gap-6 items-start w-full min-w-0">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 items-start w-full min-w-0">
         <div className="lg:col-span-2 space-y-4 lg:space-y-6 w-full min-w-0">
-          <div className="sp-card sp-gradient-brand-soft pt-5 px-5 pb-3 sm:pt-6 sm:px-6 sm:pb-4 flex gap-3 sm:gap-4 overflow-hidden items-center">
-            <div className="flex-1 min-w-0 py-2">
-              <h1 className="sp-display text-2xl sm:text-[1.75rem]">
-                Welcome back, {user?.full_name.split(" ")[0]}
-              </h1>
-              <p className="mt-1 text-ink-600">
-                Let's take the next best step for your health.
-              </p>
-              {/* A fixed two-column grid rather than a wrapping row. Buttons
-                sized to their labels wrapped into a ragged block where no two
-                edges lined up; on a grid every action is the same width and
-                the four read as one set of equal choices. The width cap keeps
-                them from stretching into banners on a wide screen, which is
-                the reason sp-btn-block exists — see components.css. */}
-              <div className="mt-5 grid gap-2.5 sm:grid-cols-2 max-w-[32rem]">
-                {ACTIONS.map((action) => (
-                  <Link
-                    key={action.to}
-                    to={action.to}
-                    className={`sp-btn sp-btn-block justify-start ${action.primary ? "sp-btn-primary" : "sp-btn-secondary bg-white"
-                      }`}
-                  >
-                    <Icon name={action.icon} size={18} className="shrink-0" />
-                    <span className="truncate">{action.label}</span>
-                  </Link>
-                ))}
+          <div className="sp-card sp-gradient-brand-soft p-4 sm:p-6 overflow-hidden">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h1 className="sp-display text-xl sm:text-2xl lg:text-[1.75rem]">
+                  Welcome back, {user?.full_name.split(" ")[0]}
+                </h1>
+                <p className="mt-1 text-xs sm:text-sm text-ink-600">
+                  Let's take the next best step for your health.
+                </p>
               </div>
+              <img
+                src={patientIllustration({
+                  sex: data.patient?.sex,
+                  age: data.patient?.age,
+                })}
+                alt=""
+                aria-hidden="true"
+                loading="lazy"
+                className="pointer-events-none h-16 w-16 sm:h-24 sm:w-24 shrink-0 select-none object-contain"
+              />
             </div>
 
-            {/* Decorative and gender-aware where the patient told us, neutral
-              where they did not — see lib/illustration.ts. Hidden from
-              assistive tech: it carries nothing the text does not. Shown on
-              mobile too, just narrower — it is the one piece of the page that
-              reflects the person using it. */}
-            <img
-              src={patientIllustration({
-                sex: data.patient?.sex,
-                age: data.patient?.age,
-              })}
-              alt=""
-              aria-hidden="true"
-              loading="lazy"
-              className="pointer-events-none hidden sm:block sm:w-36 lg:w-48 max-h-[14rem] shrink-0 self-end select-none object-contain object-bottom"
-            />
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
+              {ACTIONS.map((action) => (
+                <Link
+                  key={action.to}
+                  to={action.to}
+                  className={`sp-btn sp-btn-block justify-start text-xs sm:text-sm ${
+                    action.primary ? "sp-btn-primary" : "sp-btn-secondary bg-white"
+                  }`}
+                >
+                  <Icon name={action.icon} size={16} className="shrink-0" />
+                  <span className="truncate">{action.label}</span>
+                </Link>
+              ))}
+            </div>
           </div>
 
           {/* Appointments and reports sit inside the left column so they
               rise into the space beside the recommendation card rather
               than starting below it. */}
-          <div className="grid sm:grid-cols-2 gap-4 lg:gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6 w-full min-w-0">
             {/* Appointments */}
             <Card
               title="Upcoming Appointments"
@@ -288,7 +280,7 @@ export default function PatientDashboard() {
             }
           >
             {
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full min-w-0">
                 {!data.care_programmes?.length && (
                   <div className="sm:col-span-2">
                     <Empty
@@ -452,7 +444,7 @@ export default function PatientDashboard() {
       {/* Medication reminders */}
       {data.medication_reminders?.length > 0 && (
         <Card title="Health Reminders">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full min-w-0">
             {data.medication_reminders.map((medication: any) => (
               <div
                 key={medication.medication_id}

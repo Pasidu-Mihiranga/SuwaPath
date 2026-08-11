@@ -142,7 +142,7 @@ export function Card({
           {action && <div className="shrink-0">{action}</div>}
         </header>
       )}
-      <div className={`flex-1 p-4 sm:p-5 ${bodyClassName}`}>{children}</div>
+      <div className={`flex-1 flex flex-col min-w-0 p-4 sm:p-5 ${bodyClassName}`}>{children}</div>
     </section>
   );
 }
@@ -251,17 +251,13 @@ export function Empty({
   action?: ReactNode;
 }) {
   return (
-    /* Centred in whatever height it is given, so two empty cards side by side
-       show their icon and message on the same line rather than each starting
-       at its own header. The min-height keeps a lone empty card from
-       collapsing to something smaller than a filled one. */
-    <div className="flex h-full min-h-[11rem] flex-col items-center justify-center text-center py-10 px-4">
-      <span className="sp-icon-tile mx-auto bg-ink-100 text-ink-400 !h-12 !w-12">
+    <div className="w-full flex-1 flex flex-col items-center justify-center text-center py-6 sm:py-8 px-2 my-auto self-center">
+      <div className="sp-icon-tile bg-ink-100 text-ink-400 !h-12 !w-12 shrink-0 flex items-center justify-center">
         <Icon name={icon} size={24} />
-      </span>
-      <p className="font-medium text-ink-700 mt-3">{title}</p>
-      {hint && <p className="text-sm text-ink-500 mt-1 max-w-sm mx-auto">{hint}</p>}
-      {action && <div className="mt-4">{action}</div>}
+      </div>
+      <p className="font-medium text-ink-700 mt-3 break-words max-w-full text-center">{title}</p>
+      {hint && <p className="text-sm text-ink-500 mt-1 max-w-sm text-center break-words">{hint}</p>}
+      {action && <div className="mt-4 text-center">{action}</div>}
     </div>
   );
 }
@@ -351,8 +347,8 @@ export function Confidence({
 export function AiNotice({ children }: { children: ReactNode }) {
   return (
     <p className="text-xs text-ink-500 flex items-start gap-1.5 mt-3">
-      <Icon name="info" size={14} className="mt-px" />
-      <span>{children}</span>
+      <Icon name="info" size={14} className="mt-px shrink-0" />
+      <span className="min-w-0 flex-1 break-words">{children}</span>
     </p>
   );
 }
