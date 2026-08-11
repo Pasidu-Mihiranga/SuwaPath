@@ -65,20 +65,20 @@
     cursor: not-allowed;
   }
 
-  /* The primary action carries the brand gradient and a brand-tinted
-     shadow, so it reads as the one thing on the screen worth pressing.
-     A flat fill with a grey shadow reads as a generic control. */
+  /* The primary action is a flat brand fill with a brand-tinted shadow, so
+     it still reads as the one thing on the screen worth pressing without
+     the gradient wash. Hover deepens the fill rather than brightening it. */
   .sp-btn-primary {
-    background: var(--sp-gradient-brand);
+    background: var(--sp-brand-600);
     color: #fff;
     box-shadow: var(--sp-shadow-xs);
     transition: box-shadow var(--sp-transition-lift),
-      transform var(--sp-transition-lift), filter var(--sp-transition);
+      transform var(--sp-transition-lift), background var(--sp-transition);
   }
   .sp-btn-primary:hover:not(:disabled) {
+    background: var(--sp-brand-700);
     box-shadow: var(--sp-shadow-brand);
     transform: translateY(-1px);
-    filter: brightness(1.06);
   }
   .sp-btn-primary:active:not(:disabled) {
     transform: translateY(0) scale(0.985);
