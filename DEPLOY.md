@@ -150,8 +150,6 @@ every Actions panel empty except the patient's. `demo_prep` runs both stages
 and then prints what each demo account will actually have on screen, so the
 answer is known before a reviewer opens the page rather than after.
 
-See [DEMO.md](DEMO.md) for the walkthrough these steps prepare.
-
 ### Checks
 
 - `curl -s https://suwapath.pasidumihiranga.me/health` → `"status":"ok"`,
