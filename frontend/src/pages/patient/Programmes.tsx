@@ -109,7 +109,12 @@ function ProgrammeCatalogue({
             hint="Your active pathways are shown above."
           />
         ) : (
-          <div className="grid sm:grid-cols-2 gap-3">
+          // Three across rather than two. At two columns each card was ~446px
+          // wide for an 80px illustration and two lines of text, and an odd
+          // count left one card alone beside an empty half-row — the stretched
+          // look. Three narrower cards fill the row and suit the portrait
+          // artwork.
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {available.map((programme) => {
               const style =
                 PROGRAMME_STYLE[programme.programme_type] ?? {
@@ -120,10 +125,16 @@ function ProgrammeCatalogue({
               // authenticated account — that would defeat its purpose. It is
               // reached anonymously instead (spec §16).
               const isConfidential = programme.programme_type === "sexual_health";
+              // Computed by the API from this patient's record. Shown rather
+              // than used to hide the card: someone who does not currently
+              // qualify still benefits from knowing the programme exists and
+              // what would make it apply. See services/eligibility.py.
+              const eligibility = programme.eligibility;
+              const blocked = eligibility && eligibility.allowed === false;
               return (
                 <div
                   key={programme.code}
-                  className={`relative flex h-full flex-col overflow-hidden rounded-xl border border-line p-4 ${style.accent}`}
+                  className={`relative flex h-full flex-col overflow-hidden rounded-xl border border-line p-4 ${style.accent} ${blocked ? "opacity-70" : ""}`}
                 >
                   {/* Same media-then-text shape as the dashboard cards. The
                       artwork replaces the icon rather than sitting next to it:
@@ -150,6 +161,12 @@ function ProgrammeCatalogue({
                     <p className="text-sm text-ink-600 mt-0.5">
                       {programme.description}
                     </p>
+                    {eligibility?.reason && (
+                      <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-500">
+                        <Icon name="info" size={14} className="mt-px" />
+                        <span>{eligibility.reason}</span>
+                      </p>
+                    )}
                   </div>
                   {isConfidential ? (
                     <a href="/private" className="sp-btn sp-btn-secondary sp-btn-sm mt-auto relative self-start">
@@ -160,6 +177,8 @@ function ProgrammeCatalogue({
                     <button
                       className="sp-btn sp-btn-primary sp-btn-sm mt-auto relative self-start"
                       onClick={() => setJoining(programme)}
+                      disabled={blocked}
+                      title={blocked ? eligibility.reason : undefined}
                     >
                       Join programme
                     </button>
@@ -196,10 +215,18 @@ function EnrolDialog({
 }) {
   const [edd, setEdd] = useState("");
   const [lmp, setLmp] = useState("");
+  const [acknowledged, setAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const needsDates = programme.programme_type === "maternal";
+  // A `confirm` verdict means the record does not itself establish that this
+  // programme applies. The patient can still join, but says so explicitly and
+  // the answer is stored on the enrolment rather than assumed.
+  const confirmation =
+    programme.eligibility?.verdict === "confirm"
+      ? programme.eligibility.confirmation
+      : "";
 
   async function submit() {
     setBusy(true);
@@ -209,6 +236,7 @@ function EnrolDialog({
         programme_code: programme.code,
         expected_delivery_date: needsDates && edd ? edd : undefined,
         last_menstrual_period: needsDates && lmp ? lmp : undefined,
+        acknowledged: confirmation ? acknowledged : undefined,
       });
       onDone();
     } catch (err) {
@@ -268,6 +296,18 @@ function EnrolDialog({
           </div>
         )}
 
+        {confirmation && (
+          <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-xl border border-line bg-surface p-3">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={acknowledged}
+              onChange={(event) => setAcknowledged(event.target.checked)}
+            />
+            <span className="text-sm text-ink-600">{confirmation}</span>
+          </label>
+        )}
+
         {error && (
           <div className="mt-4">
             <ErrorNote message={error} />
@@ -281,7 +321,9 @@ function EnrolDialog({
           <button
             className="sp-btn sp-btn-primary flex-1"
             onClick={() => void submit()}
-            disabled={busy || (needsDates && !edd)}
+            disabled={
+              busy || (needsDates && !edd) || (!!confirmation && !acknowledged)
+            }
           >
             {busy ? "Joining…" : "Confirm"}
           </button>

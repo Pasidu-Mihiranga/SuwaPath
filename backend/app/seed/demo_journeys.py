@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date, timedelta
 
 import httpx
 
@@ -55,6 +56,17 @@ JOURNEYS: dict[str, dict] = {
         ],
         "report": "cbc_report.pdf",
         "image": "chest_xray_pneumonia.png",
+        # The seeder enrols this account in nothing, so its Care Programmes
+        # page is empty. Enrol through the API like a patient would, which
+        # also exercises the eligibility gate: her profile records no
+        # pregnancy, so this is a `confirm` verdict and needs the
+        # acknowledgement plus a due date.
+        "programme": {
+            "programme_code": "maternal_care",
+            "acknowledged": True,
+            "weeks_pregnant": 19,
+            "profile": {"is_pregnant": True},
+        },
     },
     "maternal@suwapath.lk": {
         "symptoms": [
@@ -145,6 +157,44 @@ def run_symptom_check(client: httpx.Client, headers: dict, turns: list[str]) -> 
     return bool(result.get("recommendation") or result.get("is_complete"))
 
 
+def enrol_programme(client: httpx.Client, headers: dict, spec: dict) -> str | None:
+    """Join a care programme, first making the profile say why it applies.
+
+    Order matters. The programme's own eligibility check reads the profile, so
+    the profile is corrected first and the enrolment is then a plain
+    `eligible` one. Setting `acknowledged` as well is deliberate belt and
+    braces: it keeps this working if the demo profile ever changes underneath.
+    """
+    code = spec["programme_code"]
+    existing = client.get("/care/enrollments", headers=headers)
+    if existing.status_code == 200:
+        if any(e.get("programme_code") == code for e in existing.json()):
+            return None
+
+    body = {"programme_code": code, "acknowledged": spec.get("acknowledged", False)}
+
+    weeks = spec.get("weeks_pregnant")
+    if weeks is not None:
+        # A due date the dashboard can count down from: 40 weeks from
+        # conception, so `weeks` behind means 40 − weeks ahead.
+        edd = date.today() + timedelta(weeks=40 - weeks)
+        body["expected_delivery_date"] = edd.isoformat()
+
+    profile_patch = dict(spec.get("profile") or {})
+    if profile_patch:
+        if weeks is not None:
+            profile_patch.setdefault("expected_delivery_date", body["expected_delivery_date"])
+        patched = client.patch("/auth/me", json=profile_patch, headers=headers)
+        if patched.status_code != 200:
+            log(f"profile update rejected ({patched.status_code}): {patched.text[:100]}")
+
+    response = client.post("/care/enrollments", json=body, headers=headers)
+    if response.status_code not in (200, 201):
+        log(f"{code} enrolment rejected ({response.status_code}): {response.text[:120]}")
+        return None
+    return code
+
+
 def upload(client: httpx.Client, headers: dict, name: str, endpoint: str, data: dict) -> bool:
     path = SAMPLES / name
     if not path.is_file():
@@ -190,11 +240,19 @@ def main() -> int:
         if headers is None:
             continue
 
+        done = []
+        # Enrolment is checked on its own rather than under the populated
+        # gate: an account can have reports and still be in no programme,
+        # which is exactly the state the seeder leaves this one in.
+        if journey.get("programme") and enrol_programme(
+            client, headers, journey["programme"]
+        ):
+            done.append("care programme")
+
         if not args.force and already_populated(client, headers):
-            log(f"{email}: already populated, skipping")
+            log(f"{email}: {', '.join(done) if done else 'already populated'}, skipping rest")
             continue
 
-        done = []
         if run_symptom_check(client, headers, journey["symptoms"]):
             done.append("symptom check")
         if journey["report"] and upload(

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import build_patient_context, resolve_patient_access
+from app.api.deps import get_patient_profile, build_patient_context, resolve_patient_access
 from app.core.db import get_db
 from app.core.security import get_current_user
 from app.models.care import (
@@ -42,7 +42,7 @@ from app.models.enums import (
 )
 from app.models.identity import User
 from app.models.platform import Notification
-from app.services import timeslots
+from app.services import eligibility, timeslots
 from app.services.detectors import medication as medication_detector
 from app.services.red_flag_engine import assess_concepts, build_context
 
@@ -62,10 +62,34 @@ from app.services.alerts import raise_guardian_alerts  # noqa: E402
 # Programmes and enrolment
 # --------------------------------------------------------------------------
 @router.get("/programmes")
-def list_programmes(db: Session = Depends(get_db)) -> list[dict]:
+def list_programmes(
+    patient_user_id: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """The catalogue, with each programme's eligibility for this patient.
+
+    Eligibility is returned rather than used to filter. Hiding a programme
+    someone does not currently qualify for leaves them with no idea it exists
+    or what would make it relevant; showing it with the reason lets them
+    correct a wrong profile field or confirm a judgement the record cannot
+    make. See `services/eligibility.py`.
+    """
+    target = current_user
+    if patient_user_id and patient_user_id != current_user.id:
+        target = resolve_patient_access(
+            db, current_user, patient_user_id, permission=GuardianPermissionType.CARE_PROGRAMME
+        )
+
     programmes = db.execute(
         select(CareProgramme).where(CareProgramme.is_active.is_(True))
     ).scalars()
+
+    profile = get_patient_profile(db, target.id)
+    maternal = db.execute(
+        select(MaternalRecord).where(MaternalRecord.patient_user_id == target.id)
+    ).scalar_one_or_none()
+
     return [
         {
             "id": p.id,
@@ -75,6 +99,7 @@ def list_programmes(db: Session = Depends(get_db)) -> list[dict]:
             "description": p.description,
             "milestones": p.milestones,
             "check_in_questions": p.check_in_questions,
+            "eligibility": eligibility.assess(p, profile, maternal=maternal).to_dict(),
         }
         for p in programmes
     ]
@@ -84,6 +109,13 @@ class EnrollRequest(BaseModel):
     programme_code: str
     expected_delivery_date: date | None = None
     last_menstrual_period: date | None = None
+    # Who this is for. A guardian holding the care-programme scope may enrol a
+    # dependent; anyone else may only enrol themselves.
+    patient_user_id: str | None = None
+    # Set when the patient has read and accepted an eligibility confirmation.
+    # Recorded on the enrolment rather than merely gating the request, so the
+    # basis for a non-standard enrolment survives in the record.
+    acknowledged: bool = False
 
 
 @router.post("/enrollments", status_code=status.HTTP_201_CREATED)
@@ -92,14 +124,46 @@ def enroll(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    if str(current_user.role) != str(UserRole.PATIENT):
-        raise HTTPException(status_code=403, detail="Only patients can enrol.")
+    # A guardian with the care-programme scope enrols on a dependent's behalf.
+    # Previously this was patient-only, which meant the person who actually
+    # manages an elderly parent's care could see the programme and not start
+    # it. Consent is checked against the same scope that governs viewing it.
+    target = current_user
+    if payload.patient_user_id and payload.patient_user_id != current_user.id:
+        target = resolve_patient_access(
+            db,
+            current_user,
+            payload.patient_user_id,
+            permission=GuardianPermissionType.CARE_PROGRAMME,
+        )
+    elif str(current_user.role) != str(UserRole.PATIENT):
+        raise HTTPException(
+            status_code=403,
+            detail="Only patients, or guardians acting for a dependent, can enrol.",
+        )
 
     programme = db.execute(
         select(CareProgramme).where(CareProgramme.code == payload.programme_code)
     ).scalar_one_or_none()
     if programme is None:
         raise HTTPException(status_code=404, detail="Care programme not found.")
+
+    profile = get_patient_profile(db, target.id)
+    existing_maternal = db.execute(
+        select(MaternalRecord).where(MaternalRecord.patient_user_id == target.id)
+    ).scalar_one_or_none()
+    verdict = eligibility.assess(programme, profile, maternal=existing_maternal)
+
+    if verdict.verdict == "ineligible":
+        raise HTTPException(status_code=409, detail=verdict.reason)
+    if verdict.verdict == "confirm" and not payload.acknowledged:
+        # 409 with the question attached, so the client can show it and retry
+        # with `acknowledged`. Not a silent block: the programme stays
+        # reachable for anyone the criteria describe imperfectly.
+        raise HTTPException(
+            status_code=409,
+            detail=f"{verdict.reason} {verdict.confirmation}",
+        )
 
     # Enrolment is idempotent and self-healing. If an active enrolment already
     # exists we reuse it rather than returning 409, then fall through to the
@@ -108,7 +172,7 @@ def enroll(
     # permanently stuck: the dashboard 404s and re-enrolling is refused.
     enrollment = db.execute(
         select(CareEnrollment).where(
-            CareEnrollment.patient_user_id == current_user.id,
+            CareEnrollment.patient_user_id == target.id,
             CareEnrollment.programme_id == programme.id,
             CareEnrollment.status == str(EnrollmentStatus.ACTIVE),
         )
@@ -117,7 +181,7 @@ def enroll(
     already_enrolled = enrollment is not None
     if enrollment is None:
         enrollment = CareEnrollment(
-            patient_user_id=current_user.id,
+            patient_user_id=target.id,
             programme_id=programme.id,
             status=EnrollmentStatus.ACTIVE,
             enrolled_at=datetime.now(timezone.utc),
@@ -128,11 +192,11 @@ def enroll(
     if programme.programme_type in (ProgrammeType.MATERNAL, ProgrammeType.POSTPARTUM):
         record = db.execute(
             select(MaternalRecord).where(
-                MaternalRecord.patient_user_id == current_user.id
+                MaternalRecord.patient_user_id == target.id
             )
         ).scalar_one_or_none()
         if record is None:
-            record = MaternalRecord(patient_user_id=current_user.id)
+            record = MaternalRecord(patient_user_id=target.id)
             db.add(record)
         record.enrollment_id = enrollment.id
         # Only overwrite dates the caller actually supplied, so a repeat call
@@ -145,12 +209,12 @@ def enroll(
 
     elif programme.programme_type == ProgrammeType.ELDERLY:
         record = db.execute(
-            select(ElderlyRecord).where(ElderlyRecord.patient_user_id == current_user.id)
+            select(ElderlyRecord).where(ElderlyRecord.patient_user_id == target.id)
         ).scalar_one_or_none()
         if record is None:
             db.add(
                 ElderlyRecord(
-                    patient_user_id=current_user.id, enrollment_id=enrollment.id
+                    patient_user_id=target.id, enrollment_id=enrollment.id
                 )
             )
 
