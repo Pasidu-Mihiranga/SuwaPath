@@ -391,7 +391,12 @@ export default function AppShell() {
           className={
             fullBleed
               ? "flex-1 min-h-0 w-full h-screen overflow-hidden"
-              : "flex-1 min-w-0 p-3 sm:p-4 lg:p-8 pt-[calc(var(--sp-topbar-h)+0.75rem)] sm:pt-[calc(var(--sp-topbar-h)+1rem)] pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
+              : // The header is fixed, so the column has to reserve its height.
+                // `lg:p-8` sets all four sides and Tailwind emits `lg:` after
+                // `sm:`, so without an explicit `lg:pt-*` the desktop top
+                // padding collapsed to 2rem against a 3.75rem header and the
+                // first card sat 28px underneath it.
+                "flex-1 min-w-0 p-3 sm:p-4 lg:p-8 pt-[calc(var(--sp-topbar-h)+0.75rem)] sm:pt-[calc(var(--sp-topbar-h)+1rem)] lg:pt-[calc(var(--sp-topbar-h)+2rem)] pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
           }
         >
           <Outlet />
