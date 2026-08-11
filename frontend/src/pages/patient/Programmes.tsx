@@ -480,11 +480,10 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
               {questions.map((question) => (
                 <label
                   key={question.code}
-                  className={`flex items-center gap-3 rounded-xl border p-3.5 cursor-pointer transition ${
-                    answers[question.code]
+                  className={`flex items-center gap-3 rounded-xl border p-3.5 cursor-pointer transition ${answers[question.code]
                       ? "border-danger-border bg-danger-surface"
                       : "border-ink-200 hover:border-brand-400"
-                  }`}
+                    }`}
                 >
                   <input
                     type="checkbox"
@@ -519,11 +518,10 @@ function MaternalPanel({ data, onCheckedIn }: { data: any; onCheckedIn: () => vo
             {data.blood_pressure.slice(0, 10).map((entry: any, index: number) => (
               <div
                 key={index}
-                className={`shrink-0 rounded-xl border p-3 text-center min-w-[92px] ${
-                  entry.is_abnormal
+                className={`shrink-0 rounded-xl border p-3 text-center min-w-[92px] ${entry.is_abnormal
                     ? "border-warn-border bg-warn-surface"
                     : "border-ink-200"
-                }`}
+                  }`}
               >
                 <p className="font-bold text-ink-900">
                   {entry.systolic}/{entry.diastolic}

@@ -16,6 +16,7 @@ import Icon, { type IconName } from "./Icon";
 import { Avatar, Brand } from "./ui";
 import { api } from "../lib/api";
 import { useAuth, type Role } from "../lib/auth";
+import ChatFab from "./ChatFab";
 
 interface NavItem {
   to: string;
@@ -32,7 +33,6 @@ interface NavItem {
 const NAV: Record<Role, NavItem[]> = {
   patient: [
     { to: "/patient", label: "Dashboard", short: "Home", icon: "home", tab: true, end: true },
-    { to: "/patient/assistant", label: "Assistant", short: "Ask", icon: "ai", tab: true },
     { to: "/patient/appointments", label: "Appointments", short: "Visits", icon: "calendar", tab: true },
     { to: "/patient/find-care", label: "Doctors & Hospitals", icon: "hospital", section: "Find care" },
     { to: "/patient/reports", label: "Medical Reports", icon: "description", section: "Find care" },
@@ -95,6 +95,7 @@ export default function AppShell() {
   const location = useLocation();
   const [unread, setUnread] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -105,8 +106,11 @@ export default function AppShell() {
       .catch(() => undefined);
   }, [location.pathname]);
 
-  // Close the drawer whenever navigation happens.
-  useEffect(() => setDrawerOpen(false), [location.pathname]);
+  // Close the drawer & plus menu whenever navigation happens.
+  useEffect(() => {
+    setDrawerOpen(false);
+    setPlusMenuOpen(false);
+  }, [location.pathname]);
 
   // Prevent the page behind the drawer from scrolling.
   useEffect(() => {
@@ -119,7 +123,6 @@ export default function AppShell() {
   if (!user) return null;
 
   const items = NAV[user.role];
-  const tabs = items.filter((item) => item.tab).slice(0, 5);
   const sections = [...new Set(items.map((item) => item.section ?? ""))];
   const home = ROLE_HOME[user.role];
   // Routes that manage their own viewport rather than sitting in the
@@ -157,32 +160,31 @@ export default function AppShell() {
   );
 
   return (
-    <div className={`flex ${fullBleed ? "h-screen overflow-hidden" : "min-h-screen"}`}>
+    <div className={`flex w-full ${fullBleed ? "h-screen overflow-hidden" : "min-h-screen"}`}>
       {/* ------------------------------------------------ desktop sidebar */}
-      {/* Pinned to the viewport rather than scrolling away with the page: the
-          menu and the help number are meant to be reachable from anywhere in a
-          long dashboard, not just the top of it. */}
-      <aside className="hidden lg:flex w-sidebar shrink-0 flex-col border-r border-line bg-surface lg:sticky lg:top-0 lg:h-screen">
-        <div className="p-4 border-b border-line">
-          <Link to={home} aria-label="SuwaPath home">
-            <Brand />
-          </Link>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3">{menu}</div>
-        <div className="p-3">
-          <div className="rounded-lg bg-ink-50 p-4">
-            <p className="text-sm font-semibold text-ink-800">Need help?</p>
-            <p className="text-xs text-ink-500 mt-0.5">Contact SuwaPath Care</p>
-            <a
-              href="tel:0112123456"
-              className="mt-1.5 inline-flex items-center gap-1.5 text-brand-700 font-bold"
-            >
-              <Icon name="phone" size={15} />
-              0112 123 456
-            </a>
+      {!fullBleed && (
+        <aside className="hidden lg:flex w-sidebar shrink-0 flex-col border-r border-line bg-surface lg:sticky lg:top-0 lg:h-screen">
+          <div className="p-4 border-b border-line">
+            <Link to={home} aria-label="SuwaPath home">
+              <Brand />
+            </Link>
           </div>
-        </div>
-      </aside>
+          <div className="flex-1 overflow-y-auto p-3">{menu}</div>
+          <div className="p-3">
+            <div className="rounded-lg bg-ink-50 p-4">
+              <p className="text-sm font-semibold text-ink-800">Need help?</p>
+              <p className="text-xs text-ink-500 mt-0.5">Contact SuwaPath Care</p>
+              <a
+                href="tel:0112123456"
+                className="mt-1.5 inline-flex items-center gap-1.5 text-brand-700 font-bold"
+              >
+                <Icon name="phone" size={15} />
+                0112 123 456
+              </a>
+            </div>
+          </div>
+        </aside>
+      )}
 
       {/* ---------------------------------------------------- mobile drawer */}
       {drawerOpen && (
@@ -235,125 +237,121 @@ export default function AppShell() {
       )}
 
       {/* ------------------------------------------------------- main area */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+      <div className="flex-1 min-w-0 w-full flex flex-col min-h-0 overflow-x-hidden">
         {/* Translucent rather than near-opaque, so content scrolling beneath
             reads through the bar instead of disappearing under a flat panel.
             supports-[]: keeps it solid where backdrop-filter is unavailable —
             otherwise the bar would go see-through with nothing blurring it. */}
-        <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/70">
-          <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
-            <button
-              className="lg:hidden sp-btn sp-btn-ghost !px-2"
-              onClick={() => setDrawerOpen(true)}
-            >
-              <Icon name="menu" size={22} label="Open menu" />
-            </button>
-            <Link to={home} className="lg:hidden" aria-label="SuwaPath home">
-              <Brand variant="mark" />
-            </Link>
-
-            {user.role === "patient" && (
-              <form
-                role="search"
-                className="hidden md:flex items-center gap-2 flex-1 max-w-md"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  const q = search.trim();
-                  navigate(
-                    q
-                      ? `/patient/find-care?q=${encodeURIComponent(q)}`
-                      : "/patient/find-care",
-                  );
-                }}
-              >
-                <div className="relative w-full">
-                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
-                    <Icon name="search" size={17} />
-                  </span>
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search doctors, hospitals, specialties…"
-                    aria-label="Search care providers"
-                    className="sp-input !h-9 !pl-9 bg-surface/80"
-                  />
-                </div>
-              </form>
-            )}
-
-            <div className="ml-auto flex items-center gap-1 sm:gap-2">
-              <Link
-                to={`${home}/notifications`}
-                className="relative sp-btn sp-btn-ghost !px-2"
-              >
-                <Icon name="notifications" size={20} label="Notifications" />
-                {unread > 0 && (
-                  <span className="absolute top-0.5 right-0.5 min-w-[17px] h-[17px] rounded-full bg-danger-text text-white text-[10px] font-bold grid place-items-center px-1">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                )}
+        {!fullBleed && (
+          <header className="fixed top-0 right-0 left-0 lg:left-64 z-30 h-topbar border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/90 shadow-sm">
+            <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
+              <Link to={home} aria-label="SuwaPath home">
+                <Brand variant="mark" />
               </Link>
 
-              <div className="relative">
-                <button
-                  onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                  className="flex items-center gap-2.5 sm:pl-3 sm:border-l border-line text-left hover:bg-ink-50 p-1.5 -my-1.5 rounded-lg transition"
+              {user.role === "patient" && (
+                <form
+                  role="search"
+                  className="hidden md:flex items-center gap-2 flex-1 max-w-md"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const q = search.trim();
+                    navigate(
+                      q
+                        ? `/patient/find-care?q=${encodeURIComponent(q)}`
+                        : "/patient/find-care",
+                    );
+                  }}
                 >
-                  <Avatar name={user.full_name} size={34} />
-                  <div className="hidden sm:block leading-tight pr-2">
-                    <p className="text-sm font-semibold text-ink-900">
-                      {user.full_name}
-                    </p>
-                    <p className="text-[11px] text-ink-500">
-                      {ROLE_LABEL[user.role]}
-                    </p>
-                  </div>
-                  <Icon name="chevronDown" size={18} className="text-ink-400 hidden sm:block" />
-                </button>
-
-                {profileMenuOpen && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-40" 
-                      onClick={() => setProfileMenuOpen(false)}
+                  <div className="relative w-full">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
+                      <Icon name="search" size={17} />
+                    </span>
+                    <input
+                      type="search"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search doctors, hospitals, specialties…"
+                      aria-label="Search care providers"
+                      className="sp-input !h-9 !pl-9 bg-surface/80"
                     />
-                    <div className="absolute right-0 mt-2 w-56 bg-surface border border-line rounded-xl shadow-xl py-1.5 z-50">
-                      <Link 
-                        to={`${home}/profile`} 
-                        className="w-full text-left px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 flex items-center gap-3 transition"
-                        onClick={() => setProfileMenuOpen(false)}
-                      >
-                        <Icon name="person" size={18} />
-                        My Profile
-                      </Link>
-                      <Link 
-                        to={`${home}/settings`} 
-                        className="w-full text-left px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 flex items-center gap-3 transition"
-                        onClick={() => setProfileMenuOpen(false)}
-                      >
-                        <Icon name="settings" size={18} />
-                        Settings
-                      </Link>
-                      <div className="h-px bg-line my-1.5" />
-                      <button
-                        onClick={() => {
-                          setProfileMenuOpen(false);
-                          logout();
-                          navigate("/login");
-                        }}
-                        className="w-full text-left px-4 py-2.5 text-sm text-danger-text hover:bg-danger-surface flex items-center gap-3 font-medium transition"
-                      >
-                        <Icon name="logoutDoor" size={18} />
-                        Sign out
-                      </button>
+                  </div>
+                </form>
+              )}
+
+              <div className="ml-auto flex items-center gap-1 sm:gap-2">
+                <Link
+                  to={`${home}/notifications`}
+                  className="relative sp-btn sp-btn-ghost !px-2"
+                >
+                  <Icon name="notifications" size={20} label="Notifications" />
+                  {unread > 0 && (
+                    <span className="absolute top-0.5 right-0.5 min-w-[17px] h-[17px] rounded-full bg-danger-text text-white text-[10px] font-bold grid place-items-center px-1">
+                      {unread > 99 ? "99+" : unread}
+                    </span>
+                  )}
+                </Link>
+
+                <div className="relative">
+                  <button
+                    onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                    className="flex items-center gap-2.5 sm:pl-3 sm:border-l border-line text-left hover:bg-ink-50 p-1.5 -my-1.5 rounded-lg transition"
+                  >
+                    <Avatar name={user.full_name} size={34} />
+                    <div className="hidden sm:block leading-tight pr-2">
+                      <p className="text-sm font-semibold text-ink-900">
+                        {user.full_name}
+                      </p>
+                      <p className="text-[11px] text-ink-500">
+                        {ROLE_LABEL[user.role]}
+                      </p>
                     </div>
-                  </>
-                )}
+                    <Icon name="chevronDown" size={18} className="text-ink-400 hidden sm:block" />
+                  </button>
+
+                  {profileMenuOpen && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-40" 
+                        onClick={() => setProfileMenuOpen(false)}
+                      />
+                      <div className="absolute right-0 mt-2 w-56 bg-surface border border-line rounded-xl shadow-xl py-1.5 z-50">
+                        <Link 
+                          to={`${home}/profile`} 
+                          className="w-full text-left px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 flex items-center gap-3 transition"
+                          onClick={() => setProfileMenuOpen(false)}
+                        >
+                          <Icon name="person" size={18} />
+                          My Profile
+                        </Link>
+                        <Link 
+                          to={`${home}/settings`} 
+                          className="w-full text-left px-4 py-2.5 text-sm text-ink-700 hover:bg-ink-50 flex items-center gap-3 transition"
+                          onClick={() => setProfileMenuOpen(false)}
+                        >
+                          <Icon name="settings" size={18} />
+                          Settings
+                        </Link>
+                        <div className="h-px bg-line my-1.5" />
+                        <button
+                          onClick={() => {
+                            setProfileMenuOpen(false);
+                            logout();
+                            navigate("/login");
+                          }}
+                          className="w-full text-left px-4 py-2.5 text-sm text-danger-text hover:bg-danger-surface flex items-center gap-3 font-medium transition"
+                        >
+                          <Icon name="logoutDoor" size={18} />
+                          Sign out
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </header>
+          </header>
+        )}
 
         {/* Most pages are documents: padded, centred, scrolling as a page.
             The assistant is an application surface — it owns the viewport,
@@ -362,37 +360,187 @@ export default function AppShell() {
         <main
           className={
             fullBleed
-              ? "flex-1 min-h-0 w-full pb-[var(--sp-bottomnav-h)] lg:pb-0"
-              : "flex-1 p-3 sm:p-4 lg:p-8 pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
+              ? "flex-1 min-h-0 w-full h-screen overflow-hidden"
+              : "flex-1 min-w-0 p-3 sm:p-4 lg:p-8 pt-[calc(var(--sp-topbar-h)+0.75rem)] sm:pt-[calc(var(--sp-topbar-h)+1rem)] pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
           }
         >
           <Outlet />
         </main>
       </div>
 
-      {/* --------------------------------------------- mobile bottom tabs */}
-      <nav className="sp-tabbar lg:hidden" aria-label="Primary">
-        {tabs.map((tab) => (
-          <NavLink
-            key={tab.to}
-            to={tab.to}
-            end={tab.end}
-            className={({ isActive }) =>
-              `sp-tab ${isActive ? "sp-tab-active" : ""}`
-            }
+      {/* ── Mobile Plus (+) Quick Action Sheet ── */}
+      {plusMenuOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[50] bg-ink-900/20 transition-opacity"
+            onClick={() => setPlusMenuOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            className="
+              fixed z-[60]
+              bottom-[calc(var(--sp-bottomnav-h)+0.75rem)] inset-x-3
+              sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-[24rem]
+              rounded-3xl border border-line bg-surface p-5
+              shadow-[0_20px_60px_rgba(0,0,0,0.22)] ring-1 ring-ink-900/10
+              animate-[fabSlideUp_250ms_cubic-bezier(0.16,1,0.3,1)]
+            "
           >
-            <span className="relative">
-              <Icon name={tab.icon} size={22} />
-              {tab.icon === "notifications" && unread > 0 && (
-                <span className="absolute -top-1 -right-1.5 min-w-[15px] h-[15px] rounded-full bg-danger-text text-white text-[9px] font-bold grid place-items-center px-1">
-                  {unread > 9 ? "9+" : unread}
+            <div className="flex items-center justify-between pb-3 border-b border-line">
+              <h2 className="text-xs font-bold text-ink-700 uppercase tracking-wider">Quick Actions</h2>
+              <button
+                onClick={() => setPlusMenuOpen(false)}
+                className="grid h-7 w-7 place-items-center rounded-full bg-ink-100 text-ink-600 hover:bg-ink-200"
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-y-5 gap-x-3">
+              {/* 1. AI Assistant */}
+              <button
+                onClick={() => {
+                  setPlusMenuOpen(false);
+                  window.dispatchEvent(new CustomEvent("toggle-chat-fab"));
+                }}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-600 text-white shadow-md shadow-brand-600/20 group-hover:scale-105 transition-transform">
+                  <Icon name="ai" size={26} />
                 </span>
-              )}
-            </span>
-            {tab.short ?? tab.label}
+                <span className="text-xs font-medium text-ink-800 leading-snug">AI Assistant</span>
+              </button>
+
+              {/* 2. Image Screening */}
+              <Link
+                to="/patient/imaging"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-purple-50 text-purple-600 border border-purple-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="scan" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Image Screening</span>
+              </Link>
+
+              {/* 3. Care Programmes */}
+              <Link
+                to="/patient/programmes"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-pink-50 text-pink-600 border border-pink-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="favorite" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Care Programmes</span>
+              </Link>
+
+              {/* 4. Medical History */}
+              <Link
+                to="/patient/history"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-amber-50 text-amber-600 border border-amber-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="history" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Medical History</span>
+              </Link>
+
+              {/* 5. Sharing & Consent */}
+              <Link
+                to="/patient/sharing"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="lock" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Sharing & Consent</span>
+              </Link>
+
+              {/* 6. Medical Reports */}
+              <Link
+                to="/patient/reports"
+                onClick={() => setPlusMenuOpen(false)}
+                className="flex flex-col items-center text-center gap-1.5 transition active:scale-95 group"
+              >
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 shadow-sm group-hover:scale-105 transition-transform">
+                  <Icon name="description" size={26} />
+                </span>
+                <span className="text-xs font-medium text-ink-800 leading-snug">Medical Reports</span>
+              </Link>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* --------------------------------------------- mobile bottom tabs (5 sections) */}
+      {!fullBleed && (
+        <nav className="sp-tabbar lg:hidden" aria-label="Primary">
+          {/* Tab 1: Home */}
+          <NavLink
+            to="/patient"
+            end
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="home" size={22} />
+            <span className="truncate w-full text-center">Home</span>
           </NavLink>
-        ))}
-      </nav>
+
+          {/* Tab 2: Visits */}
+          <NavLink
+            to="/patient/appointments"
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="calendar" size={22} />
+            <span className="truncate w-full text-center">Visits</span>
+          </NavLink>
+
+          {/* Tab 3 (CENTER): Plus (+) Quick Action Menu */}
+          <button
+            type="button"
+            onClick={() => setPlusMenuOpen(!plusMenuOpen)}
+            className="sp-tab flex flex-col items-center justify-center shrink-0 min-w-0 px-1"
+            title="More Options & Actions"
+          >
+            <span className="grid h-12 w-12 sm:h-13 sm:w-13 place-items-center rounded-full bg-brand-600 text-white shadow-xl shadow-brand-600/40 border-2 border-surface -mt-4 transition active:scale-95">
+              <Icon
+                name="add"
+                size={28}
+                className={`transition-transform duration-[1800ms] ease-in-out ${
+                  plusMenuOpen ? "rotate-[360deg]" : "rotate-0"
+                }`}
+              />
+            </span>
+            <span className="truncate w-full text-center text-[11px] font-bold text-brand-700 mt-0.5">
+              More
+            </span>
+          </button>
+
+          {/* Tab 4: Find Care */}
+          <NavLink
+            to="/patient/find-care"
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="hospital" size={22} />
+            <span className="truncate w-full text-center">Find Care</span>
+          </NavLink>
+
+          {/* Tab 5: Reports */}
+          <NavLink
+            to="/patient/reports"
+            className={({ isActive }) => `sp-tab ${isActive ? "sp-tab-active" : ""}`}
+          >
+            <Icon name="description" size={22} />
+            <span className="truncate w-full text-center">Reports</span>
+          </NavLink>
+        </nav>
+      )}
+
+      {/* Floating chat assistant shortcut — visible on every page except
+          the Assistant itself. The component checks role and route. */}
+      <ChatFab />
     </div>
   );
 }
