@@ -594,6 +594,36 @@ cd backend && PYTHONPATH=. .venv/bin/python tests/test_scenarios.py
 Runs all seven required demo scenarios plus RBAC boundary checks against the
 live API. Expect **73 checks, 0 failures**.
 
+Two suites need no server and no database, so they are the quickest way to
+tell whether a change broke something structural:
+
+```bash
+cd backend
+PYTHONPATH=. .venv/bin/python tests/test_enums.py
+PYTHONPATH=. .venv/bin/python tests/test_eligibility.py
+```
+
+### 5 · Starting daily development
+
+You **do not** need to create or seed the database every time. The database setup steps above are strictly for the first run. The database runs automatically in the background on your machine.
+
+To start the platform on subsequent days, run these two commands in separate terminal windows:
+
+**Terminal 1 (Backend API):**
+```bash
+cd backend
+# Mac / Linux:
+.venv/bin/uvicorn app.main:app --port 8000
+# Windows:
+.venv\Scripts\uvicorn app.main:app --port 8000
+```
+
+**Terminal 2 (Frontend):**
+```bash
+cd frontend
+npm run dev
+```
+
 ---
 
 ## Configuration

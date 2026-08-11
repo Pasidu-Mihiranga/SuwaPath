@@ -813,10 +813,53 @@ Each component is now capped, so volume cannot swamp severity. Worth noticing
 that the flaw was only visible because the demo data had accumulated real
 alerts from the detectors; on a clean database it would have looked fine.
 
+### 21. Care programmes had no eligibility at all
+
+`enroll()` checked the caller's role and that the programme existed. Nothing
+else. A 25-year-old man could join Elderly Care, and someone who has never
+been pregnant could join Maternal Care — after which the maternal dashboard
+renders a pregnancy week for a patient with no pregnancy, and the danger-sign
+check-in asks about reduced fetal movement. Not a cosmetic problem.
+
+`services/eligibility.py` now answers one of three ways, and the choice of
+three is the whole design. Enterprise care management does not hard-block:
+eligibility is computed from the record, ineligible patients are shown *as*
+ineligible with the reason, and an override is recorded rather than refused.
+Hard blocks get worked around by putting false data in the record, which is
+worse than an audited override — a 62-year-old with genuine frailty belongs in
+elderly care and should not have to lie about their age to get there. So
+`ineligible` is used only for a factual contradiction the record cannot
+resolve (a maternal programme for a profile recording male), `confirm` covers
+everything plausible-but-unverified and is stored on the enrolment, and the
+confidential sexual-health pathway is never gated at all — an eligibility
+question there is one more reason not to ask.
+
+The catalogue endpoint returns the verdict per programme rather than filtering
+the list. Hiding a programme someone does not currently qualify for leaves
+them with no idea it exists or what would make it relevant.
+
+### 22. Keyword-only arguments passed positionally — a 500 only guardians saw
+
+Shipped in the same change as #21. `resolve_patient_access(db, user, pid,
+PERMISSION)` — the fourth parameter is keyword-only. It imports cleanly,
+pyflakes says nothing, and it raises `TypeError` at request time. Every
+patient path stayed green because they never reach that branch; every guardian
+acting for a dependent got a 500. Found by actually exercising the guardian
+route, not by any of the six existing suites.
+
+`tests/test_eligibility.py` now scans for the bug class statically: it finds
+every function in `app/` with keyword-only parameters and checks no call
+passes more positional arguments than the signature allows. Matching on the
+bare name alone produced four false alarms (`session.run` on an ONNX session,
+`messages.append` on a list), so it only checks bare-name calls where the name
+is imported from an `app.` module or defined in the same file. Verified by
+reintroducing the bug: exit 1, one finding, correct line.
+
 ### 10. Smaller ones
 
 | Bug | Cause |
 | --- | --- |
+| Care catalogue looked stretched | 3 cards in a 2-column grid left one alone beside an empty half-row, each ~446px wide for an 80px illustration. `lg:grid-cols-3` → 298px, one tidy row. |
 | `websockets` version conflict | langgraph wants ≥15, google-genai wants <15 → pinned `14.2` |
 | `.venv/bin/python: no such file` | venv is at `backend/.venv`; user ran from repo root. README callout added. |
 | Stuck care-programme enrolment | `CareEnrollment` without a backing `ElderlyRecord`; re-enrol 409'd, dashboard 404'd. Made idempotent and self-healing. |
@@ -1002,6 +1045,7 @@ PYTHONPATH=. .venv/bin/python tests/test_react.py         # 23 checks, no server
 PYTHONPATH=. .venv/bin/python tests/test_roles.py         # 15 checks
 PYTHONPATH=. .venv/bin/python tests/test_coverage.py      # 11 checks
 PYTHONPATH=. .venv/bin/python tests/test_enums.py         # static, no server
+PYTHONPATH=. .venv/bin/python tests/test_eligibility.py   # static, no server
 ```
 
 `test_agent.py` asserts *properties* — consent enforcement, guardrail
