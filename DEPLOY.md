@@ -79,17 +79,46 @@ publishes only to `127.0.0.1:8020`, reachable from nginx but not the internet.
 No registry credential is stored on the server — the deploy job logs the VPS
 into GHCR with its own short-lived `GITHUB_TOKEN` over SSH, on every run.
 
+### Manual steps CI does not run
+
+**The GitHub Actions workflow builds, ships and restarts the containers. That
+is all it does.** It never touches the database. Four scripts exist that CI
+does not call, and each has a different cadence — getting the cadence wrong is
+either destructive or a no-op:
+
+| Script | When | If you skip it |
+|---|---|---|
+| `scripts.migrate` | **every deploy** that changed schema or seeded content | Missing columns and stale seeded text. `create_all()` adds tables, never columns. |
+| `app.seed.seeder --reset` | **once**, on an empty database | Nothing to sign in to. Destructive if re-run. |
+| `app.seed.demo_journeys` | after seeding | Demo dashboards are empty cards. |
+| `scripts.demo_prep` | before anyone reviews or records | Every Actions panel but the patient's looks dead. |
+
+There is no automatic path for any of them, deliberately: `--reset` truncates
+35 tables and does not belong on a pipeline triggered by a push to `main`. But
+that means **`migrate` is easy to forget, and forgetting it is silent** — the
+app boots fine and fails later on the one query that needs the new column.
+
 ### First deploy / re-seeding
 
 ```bash
 ssh deploy@159.65.1.78
 cd /opt/suwapath
-docker compose exec backend python -m app.seed.seeder --reset      # once
-docker compose exec backend python -m app.seed.demo_journeys       # then this
+docker compose exec backend python -m scripts.migrate               # every deploy
+docker compose exec backend python -m app.seed.seeder --reset       # once
+docker compose exec backend python -m app.seed.demo_journeys        # then this
+docker compose exec backend python -m scripts.demo_prep             # then this
 ```
 
 `--reset` truncates every table — safe on an empty database, destructive on a
 live one. Run it once, not on every deploy.
+
+`scripts.migrate` is the opposite: run it on **every** deploy. It is a
+forward-only ledger of idempotent statements, so running it when nothing has
+changed is a no-op that costs a second. It carries both schema changes
+`create_all()` cannot make and corrections to seeded content — the seeder
+writes its rows only on a fresh `--reset`, so a fix to, say, a care
+programme's name would otherwise never reach a database that is already
+running.
 
 **The second command is not optional if anyone is going to look at the demo
 accounts.** The seeder builds the hospital — patients, doctors, appointments,
@@ -110,6 +139,18 @@ One honest limitation: a symptom conversation only concludes when the history
 gives the engine enough to assess, so the gentler scripted histories stop at
 the question stage and the recommendation on those accounts comes from the
 uploaded report instead. The dashboards are populated either way.
+
+`demo_prep` is the fourth command and the least obvious. The autonomy layer
+runs in two stages: a detector notices something and **enqueues a task**, and
+a worker later turns that task into the **proposal a human sees**. Between
+those stages the work is real, recorded in `agent_tasks`, and invisible in the
+UI. A development database was found holding 379 unprocessed tasks — 14
+no-show reminder batches, 64 lapsed follow-ups, 300 medication checks — with
+every Actions panel empty except the patient's. `demo_prep` runs both stages
+and then prints what each demo account will actually have on screen, so the
+answer is known before a reviewer opens the page rather than after.
+
+See [DEMO.md](DEMO.md) for the walkthrough these steps prepare.
 
 ### Checks
 
