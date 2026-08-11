@@ -11,9 +11,19 @@ single container; this is a list of idempotent statements applied in order,
 and it costs half an hour. If this project ever grows a second deployment or a
 rollback requirement, replace it with Alembic rather than extending it.
 
+It also carries **data** corrections, for the same reason: the seeder writes
+its rows only on a fresh `--reset`, so a fix to seeded content never reaches a
+deployment that is already running. Those statements are keyed on a stable
+business key (a programme `code`, not an id) so re-running rewrites the same
+row rather than creating a second one.
+
 Every statement here must be safe to run twice — Postgres gives us
 `IF NOT EXISTS` for columns and indexes, and dropping a NOT NULL that is
 already dropped is a no-op.
+
+**Nothing runs this automatically.** It is not in the Dockerfile, the compose
+file or the app's startup, so a deploy that needs it needs the command below
+run by hand afterwards.
 
     python -m scripts.migrate
 """
@@ -76,6 +86,31 @@ MIGRATIONS: list[tuple[str, str]] = [
         """
         CREATE INDEX IF NOT EXISTS ix_action_proposals_role
         ON action_proposals (audience_role, audience_scope_id, status)
+        """,
+    ),
+    # Data, not schema. The seeder only writes these rows on a fresh `--reset`,
+    # so a fix to a programme's name never reaches a deployment that is already
+    # running — the old name sits in the database indefinitely. Keyed on `code`,
+    # which is the stable identifier; re-running just rewrites the same text.
+    (
+        "rename: maternal programme no longer says 'Postpartum'",
+        """
+        UPDATE care_programmes
+        SET name = 'Pregnancy & Antenatal Care',
+            description = 'Pregnancy monitoring, antenatal visit reminders, '
+                          'scan and test milestones, and warning-sign check-ins.'
+        WHERE code = 'maternal_care'
+        """,
+    ),
+    (
+        "rename: postpartum programme reads plainly",
+        """
+        UPDATE care_programmes
+        SET name = 'After Birth & Newborn Care',
+            description = 'Recovery after delivery, feeding support, '
+                          'mental-wellbeing screening, and newborn checks and '
+                          'vaccination reminders.'
+        WHERE code = 'postpartum_care'
         """,
     ),
 ]
