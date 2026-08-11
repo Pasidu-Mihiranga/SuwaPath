@@ -5,7 +5,11 @@
      3. components.css — named component classes, inside @layer components
    Utilities are emitted last, so a Tailwind utility can always override a
    component class when a one-off tweak is genuinely needed. */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+/* Webfonts are loaded by the <link> tags in index.html, which preconnect and
+   fetch in parallel with this stylesheet. A CSS @import cannot start until
+   this file has been fetched and parsed, so it serialises the request and
+   delays first paint — and the one that used to be here also still asked for
+   a face nothing references any more. */
 @import "./styles/tokens.css";
 @import "./styles/components.css";
 
@@ -29,11 +33,16 @@
     overflow-x: hidden;
   }
 
+  /* Titles use the display face; body copy stays on the reading face.
+     Applied to the elements rather than only to `.sp-display`/`.sp-heading`
+     because plenty of screens write a plain `<h1 class="text-2xl font-bold">`,
+     and those should not silently fall back to the body font. */
   h1,
   h2,
   h3,
   h4 {
     color: var(--sp-ink-900);
+    font-family: var(--sp-font-display);
     font-weight: 700;
     letter-spacing: -0.01em;
   }
