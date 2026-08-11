@@ -171,20 +171,26 @@
   /* ---------------------------------------------------------- typography
      Three faces, each with a job:
 
-       sans     Inter — body, UI, everything by default.
-       display  Inter Tight — headings only. Narrower and tighter than Inter,
-                so a heading reads as a heading at the same size instead of
-                relying on weight alone.
+       sans     Nunito Sans — body, UI, descriptions, everything by default.
+       display  Google Sans — headings and section titles. Geometric and a
+                little wider than the body face, so a heading reads as a
+                heading at the same size instead of relying on weight alone.
        mono     JetBrains Mono — section labels and, more importantly, any
                 clinical number. Lab values in a proportional face make
                 "10.2" and "1.02" hard to scan in a column.
 
-     Inter was previously declared but never loaded, so the whole app silently
-     rendered in the system UI font. The @font-face-backed webfonts are pulled
-     in by index.html; these stacks still degrade to system faces offline. */
-  --sp-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system,
+     A face declared here but not fetched fails silently: the stack simply
+     falls through to the system UI font and everything still looks broadly
+     fine, which is why it went unnoticed once before. Anything named here
+     must also appear in the <link> in index.html. */
+  /* Body copy — descriptions, labels, everything that is read rather than
+     scanned. Nunito Sans has open apertures and a tall x-height, which is
+     what keeps small text legible on a phone in daylight. */
+  --sp-font-sans: "Nunito Sans", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --sp-font-display: "Inter Tight", "Inter", ui-sans-serif, system-ui,
+  /* Headings and section titles. Google Sans is geometric and slightly wider,
+     so it separates from the body face at a glance without a weight jump. */
+  --sp-font-display: "Google Sans", "Nunito Sans", ui-sans-serif, system-ui,
     -apple-system, "Segoe UI", sans-serif;
   --sp-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code",
     Menlo, monospace;
