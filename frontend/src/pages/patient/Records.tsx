@@ -54,15 +54,15 @@ export function Reports() {
 
   return (
     <div className="space-y-5">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5">
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold text-ink-900">Medical Reports</h1>
-          <p className="text-ink-500">
+          <p className="text-ink-500 text-sm mt-1">
             Upload a lab report, prescription or radiology report. We read it and
             explain it in plain language.
           </p>
         </div>
-        <label className="sp-btn sp-btn-primary cursor-pointer">
+        <label className="sp-btn sp-btn-primary cursor-pointer shrink-0 w-full sm:w-auto text-center justify-center">
           <input
             ref={fileRef}
             type="file"
@@ -73,6 +73,7 @@ export function Reports() {
               if (file) void upload(file);
             }}
           />
+          <Icon name="upload" size={18} />
           {uploading ? "Processing…" : "Upload report"}
         </label>
       </header>
@@ -109,14 +110,23 @@ export function Reports() {
                       {formatDateTime(item.uploaded_at)} ·{" "}
                       {item.document_type.replace(/_/g, " ")}
                     </p>
+                    {item.abnormal_count > 0 ? (
+                      <span className="sp-chip sp-chip-warn mt-1.5 inline-flex sm:hidden">
+                        {item.abnormal_count} to review
+                      </span>
+                    ) : (
+                      <div className="mt-1.5 inline-flex sm:hidden">
+                        <StatusChip value={item.processing_status} />
+                      </div>
+                    )}
                   </div>
                 </div>
                 {item.abnormal_count > 0 ? (
-                  <span className="sp-chip sp-chip-warn shrink-0 pl-11 sm:pl-0">
+                  <span className="sp-chip sp-chip-warn shrink-0 hidden sm:inline-flex">
                     {item.abnormal_count} to review
                   </span>
                 ) : (
-                  <div className="shrink-0 pl-11 sm:pl-0">
+                  <div className="shrink-0 hidden sm:block">
                     <StatusChip value={item.processing_status} />
                   </div>
                 )}
@@ -271,7 +281,7 @@ export function Imaging() {
       <header>
         <h1 className="text-2xl font-bold text-ink-900">Medical Image Screening</h1>
         <p className="text-ink-500">
-          AI-assisted screening support. This is not a diagnosis — a clinician
+          AI-assisted screening support. This is not a diagnosis. A clinician
           must review the original image.
         </p>
       </header>
