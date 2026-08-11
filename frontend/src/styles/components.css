@@ -514,7 +514,7 @@
    should use `sp-numeric`.
    ========================================================================== */
 @layer components {
-  /* Page and hero titles. Inter Tight with optical tracking — at display
+  /* Page and hero titles. Google Sans with optical tracking — at display
      sizes the default letter-spacing looks loose. */
   .sp-display {
     font-family: var(--sp-font-display);
