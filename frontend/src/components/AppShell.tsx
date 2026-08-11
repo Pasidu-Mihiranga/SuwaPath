@@ -245,7 +245,10 @@ export default function AppShell() {
         {!fullBleed && (
           <header className="fixed top-0 right-0 left-0 lg:left-64 z-30 h-topbar border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/90 shadow-sm">
             <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
-              <Link to={home} aria-label="SuwaPath home">
+              {/* Mobile only. On large screens the sidebar already carries the
+                  wordmark, and showing the mark here too puts two logos on one
+                  row. */}
+              <Link to={home} className="lg:hidden" aria-label="SuwaPath home">
                 <Brand variant="mark" />
               </Link>
 
