@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams , useSearchParams } from "react-router-dom";
 import Icon from "../../components/Icon";
 import {
   AiNotice,
@@ -545,6 +545,9 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 export function MyPatients() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [params] = useSearchParams();
+  // Free text from the top bar, narrowing the list already on screen.
+  const query = (params.get("q") ?? "").trim().toLowerCase();
 
   useEffect(() => {
     api
@@ -555,21 +558,29 @@ export function MyPatients() {
 
   if (loading) return <Spinner />;
 
+  const visible = !query
+    ? items
+    : items.filter((patient: any) =>
+        String(patient.name ?? "").toLowerCase().includes(query),
+      );
+
   return (
     <div className="space-y-5">
       <header>
         <h1 className="text-2xl font-bold text-ink-900">My Patients</h1>
         <p className="text-ink-500">
-          Patients booked with you or referred to you.
+          {query
+            ? `${visible.length} of ${items.length} patients matching “${query}”`
+            : "Patients booked with you or referred to you."}
         </p>
       </header>
 
-      {items.length === 0 ? (
-        <Empty title="No patients yet" />
+      {visible.length === 0 ? (
+        <Empty title={query ? `No patients matching “${query}”` : "No patients yet"} />
       ) : (
         <Card className="!p-0">
           <div className="divide-y divide-ink-100">
-            {items.map((patient) => (
+            {visible.map((patient) => (
               <Link
                 key={patient.user_id}
                 to={`/doctor/patients/${patient.user_id}`}
