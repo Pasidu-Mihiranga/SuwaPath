@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Area,
   AreaChart,
@@ -707,6 +708,10 @@ export function Capacity() {
 export function Providers() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [params] = useSearchParams();
+  // Free text from the top bar. The roster is already loaded in full, so this
+  // narrows what is on screen rather than going back to the server.
+  const query = (params.get("q") ?? "").trim().toLowerCase();
 
   useEffect(() => {
     api
@@ -717,11 +722,23 @@ export function Providers() {
 
   if (loading) return <Spinner />;
 
+  const visible = !query
+    ? items
+    : items.filter((doctor: any) =>
+        [doctor.name, doctor.specialty_name, doctor.sub_specialty]
+          .filter(Boolean)
+          .some((field: string) => field.toLowerCase().includes(query)),
+      );
+
   return (
     <div className="space-y-5">
       <header>
         <h1 className="text-2xl font-bold text-ink-900">Provider Roster</h1>
-        <p className="text-ink-500">{items.length} active providers</p>
+        <p className="text-ink-500">
+          {query
+            ? `${visible.length} of ${items.length} providers matching “${query}”`
+            : `${items.length} active providers`}
+        </p>
       </header>
 
       <Card className="!p-0 overflow-hidden">
@@ -738,7 +755,7 @@ export function Providers() {
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-50">
-              {items.map((doctor) => (
+              {visible.map((doctor) => (
                 <tr key={doctor.doctor_id} className="hover:bg-ink-50">
                   <td className="py-3 px-4 font-medium text-ink-900">
                     {doctor.name}

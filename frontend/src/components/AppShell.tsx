@@ -81,6 +81,30 @@ const ROLE_LABEL: Record<Role, string> = {
   system_admin: "System Admin",
 };
 
+/**
+ * Where the top-bar search sends each role, and what it searches.
+ *
+ * Only roles whose destination actually filters on `?q=` appear here. A
+ * search box that leads nowhere is worse than no search box — the same
+ * mistake as a button wired to an empty handler — so guardian and system
+ * admin are deliberately absent: a guardian has a handful of dependents on
+ * one screen, and the admin user list carries its own filter.
+ */
+const SEARCH_TARGET: Partial<Record<Role, { to: string; placeholder: string }>> = {
+  patient: {
+    to: "/patient/find-care",
+    placeholder: "Search doctors, hospitals, specialties…",
+  },
+  doctor: {
+    to: "/doctor/patients",
+    placeholder: "Search your patients…",
+  },
+  hospital_admin: {
+    to: "/hospital/providers",
+    placeholder: "Search providers and specialties…",
+  },
+};
+
 const ROLE_HOME: Record<Role, string> = {
   patient: "/patient",
   guardian: "/guardian",
@@ -164,7 +188,11 @@ export default function AppShell() {
       {/* ------------------------------------------------ desktop sidebar */}
       {!fullBleed && (
         <aside className="hidden lg:flex w-sidebar shrink-0 flex-col border-r border-line bg-surface lg:sticky lg:top-0 lg:h-screen">
-          <div className="p-4 border-b border-line">
+          {/* Same height as the topbar, so the two bottom borders form one
+              continuous line across the page. `p-4` around a 3rem logo made
+              this block 5rem tall against the topbar's 3.75rem, which read as
+              the header being misaligned with the sidebar. */}
+          <div className="flex h-topbar items-center px-4 border-b border-line">
             <Link to={home} aria-label="SuwaPath home">
               <Brand />
             </Link>
@@ -243,7 +271,7 @@ export default function AppShell() {
             supports-[]: keeps it solid where backdrop-filter is unavailable —
             otherwise the bar would go see-through with nothing blurring it. */}
         {!fullBleed && (
-          <header className="fixed top-0 right-0 left-0 lg:left-64 z-30 h-topbar border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/90 shadow-sm">
+          <header className="fixed top-0 right-0 left-0 lg:left-64 z-30 h-topbar border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/70 shadow-sm">
             <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
               {/* Mobile only. On large screens the sidebar already carries the
                   wordmark, and showing the mark here too puts two logos on one
@@ -252,17 +280,16 @@ export default function AppShell() {
                 <Brand variant="mark" />
               </Link>
 
-              {user.role === "patient" && (
+              {SEARCH_TARGET[user.role] && (
                 <form
                   role="search"
                   className="hidden md:flex items-center gap-2 flex-1 max-w-md"
                   onSubmit={(event) => {
                     event.preventDefault();
+                    const target = SEARCH_TARGET[user.role]!;
                     const q = search.trim();
                     navigate(
-                      q
-                        ? `/patient/find-care?q=${encodeURIComponent(q)}`
-                        : "/patient/find-care",
+                      q ? `${target.to}?q=${encodeURIComponent(q)}` : target.to,
                     );
                   }}
                 >
@@ -274,8 +301,8 @@ export default function AppShell() {
                       type="search"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Search doctors, hospitals, specialties…"
-                      aria-label="Search care providers"
+                      placeholder={SEARCH_TARGET[user.role]!.placeholder}
+                      aria-label={SEARCH_TARGET[user.role]!.placeholder}
                       className="sp-input !h-9 !pl-9 bg-surface/80"
                     />
                   </div>
