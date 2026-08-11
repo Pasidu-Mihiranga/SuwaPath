@@ -143,15 +143,23 @@ export default function PatientDashboard() {
             <p className="mt-1 text-ink-600">
               Let's take the next best step for your health.
             </p>
-            <div className="mt-5 flex flex-wrap gap-2.5">
+            {/* A fixed two-column grid rather than a wrapping row. Buttons
+                sized to their labels wrapped into a ragged block where no two
+                edges lined up; on a grid every action is the same width and
+                the four read as one set of equal choices. The width cap keeps
+                them from stretching into banners on a wide screen, which is
+                the reason sp-btn-block exists — see components.css. */}
+            <div className="mt-5 grid gap-2.5 sm:grid-cols-2 max-w-[32rem]">
               {ACTIONS.map((action) => (
                 <Link
                   key={action.to}
                   to={action.to}
-                  className={action.primary ? "sp-btn sp-btn-primary" : "sp-btn sp-btn-secondary bg-white"}
+                  className={`sp-btn sp-btn-block justify-start ${
+                    action.primary ? "sp-btn-primary" : "sp-btn-secondary bg-white"
+                  }`}
                 >
-                  <Icon name={action.icon} size={18} />
-                  {action.label}
+                  <Icon name={action.icon} size={18} className="shrink-0" />
+                  <span className="truncate">{action.label}</span>
                 </Link>
               ))}
             </div>
