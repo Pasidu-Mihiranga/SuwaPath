@@ -115,30 +115,60 @@ medication reminders.
 **This is the most important 90 seconds in the video.** Type a symptom
 description with a red flag in it — chest pain with breathlessness works.
 
-> The system takes a history, then assesses. And the critical detail: the
-> urgency level is **never** set by a language model. It comes from a
-> deterministic rule engine — 24 rules, source-readable, that always produce
-> the same answer for the same input.
+> The system takes a history the way a clinician does — targeted questions,
+> not a form — and decides for itself when it has enough to assess.
+
+Then, and only then, the determinism point. **Order matters here.** Leading
+with "it's rule-based" invites the obvious objection — that a rule-based
+chatbot is not agentic — because it opens on the least agentic component.
+Introduce the rules as the *boundary the agent cannot cross*, not as the
+mechanism:
+
+> The agent chooses what to do. There is exactly one thing it is not allowed
+> to choose, and that is how urgent you are. That comes from 23 auditable
+> rules over the patient's own words, and no model output can move it.
 >
 > A language model writes the explanation. It does not decide how urgent you
-> are. If the model is unavailable, the urgency is still correct, and the
-> system falls back to written composers rather than guessing.
+> are. If the model is unavailable, the urgency is still correct.
 
-That distinction is the strongest safety claim the project has. Say it slowly.
+If someone pushes back that rules make this "just a rule-based chatbot", the
+answer is a subtraction: **remove the rules and the system still routes,
+plans, loops, judges and proposes — fully agentic and unsafe. Remove the model
+and it stops choosing anything.** The agency lives in the model half; the
+rules only constrain it. Full argument in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 #### 1c. Assistant `/patient/assistant`
 
 Ask something that needs a lookup — *"where can I get an MRI in Colombo"*.
 
-> This is an agent, not a chatbot with a search box. It plans, calls a tool,
-> looks at what came back, and decides whether it needs another one, up to a
-> bounded number of steps with a wall-clock deadline.
+**Show the trace, not just the answer.** The reasoning is the product here;
+an answer alone is indistinguishable from a chatbot's.
+
+> This plans, calls a tool, looks at the outcome, and decides whether it needs
+> another — up to four steps, six tool calls, on a twelve-second deadline.
 >
-> One property worth stating: while it is planning, the planner sees only
-> *metadata* about each tool result — which tool ran, whether it succeeded,
-> how many rows came back. It never sees the content. That makes it
-> structurally impossible for a medical record to leak into a web-search
-> prompt, rather than merely against the rules.
+> Fan-out alone would not do this. Parallel agents are dispatched from one
+> routing decision and none can see what another produced. So a consultation
+> concluding "see a gastroenterologist, and an ultrasound would settle it"
+> used to just stop — the agent that could find that gastroenterologist was
+> never dispatched, because at routing time nobody knew a gastroenterologist
+> would be the answer. The loop is what fixed that.
+>
+> And the property worth stating slowly: while planning, the planner sees only
+> *metadata* — which tool ran, whether it succeeded, how many rows came back.
+> Never the content. `{"step": 2, "tool": "find_care", "status": "ok",
+> "n_results": 3}`. It knows the lookup worked; it does not know which
+> doctors.
+>
+> That is why a medical record cannot leak into a web-search prompt. Not
+> because a rule forbids it — because the content was never in the planning
+> prompt to leak. Content is read once, at the end, under one route's field
+> allowlist.
+
+If asked whether it loops on every message: **no, and say so.** It runs after
+an assessment, when there is a conclusion to act on. Running it on every turn
+cost a model call plus lookups for nothing — four knowledge lookups on a turn
+that needed none, before it was gated.
 
 Then switch the composer to **private mode**.
 
