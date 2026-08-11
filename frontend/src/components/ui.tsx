@@ -118,24 +118,24 @@ export function Card({
        the body can centre itself in. */
     <section className={`sp-card flex flex-col ${className}`}>
       {(title || action) && (
-        <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 p-4 sm:p-5 pb-0 sm:pb-0">
-          <div className="flex items-start gap-2.5 min-w-0">
+        <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 p-3.5 sm:p-5 pb-0 sm:pb-0">
+          <div className="flex items-start gap-2.5 min-w-0 flex-1">
             {icon && (
-              <span className="sp-icon-tile bg-brand-50 text-brand-700 !h-8 !w-8">
+              <span className="sp-icon-tile bg-brand-50 text-brand-700 !h-8 !w-8 shrink-0">
                 <Icon name={icon} size={18} />
               </span>
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               {/* Titles wrap rather than ellipsize: a card header is short on
                   space in a multi-column grid, and a truncated heading reads
                   worse than one that wraps to a second line. */}
               {title && (
-                <h2 className="sp-heading text-base">
+                <h2 className="sp-heading text-base break-words">
                   {title}
                 </h2>
               )}
               {subtitle && (
-                <p className="text-sm text-ink-500 mt-0.5">{subtitle}</p>
+                <p className="text-sm text-ink-500 mt-0.5 break-words">{subtitle}</p>
               )}
             </div>
           </div>
