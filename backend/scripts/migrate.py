@@ -88,6 +88,20 @@ MIGRATIONS: list[tuple[str, str]] = [
         ON action_proposals (audience_role, audience_scope_id, status)
         """,
     ),
+    (
+        "image_analyses.measurements",
+        """
+        ALTER TABLE image_analyses
+        ADD COLUMN IF NOT EXISTS measurements JSONB DEFAULT '[]'::jsonb
+        """,
+    ),
+    (
+        "image_analyses.decision_threshold",
+        """
+        ALTER TABLE image_analyses
+        ADD COLUMN IF NOT EXISTS decision_threshold DOUBLE PRECISION
+        """,
+    ),
     # Data, not schema. The seeder only writes these rows on a fresh `--reset`,
     # so a fix to a programme's name never reaches a deployment that is already
     # running — the old name sits in the database indefinitely. Keyed on `code`,
