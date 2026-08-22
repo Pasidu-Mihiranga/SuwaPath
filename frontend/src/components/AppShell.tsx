@@ -245,7 +245,9 @@ export default function AppShell() {
         {!fullBleed && (
           <header className="fixed top-0 right-0 left-0 lg:left-64 z-30 h-topbar border-b border-line bg-surface/95 backdrop-blur-xl supports-[backdrop-filter]:bg-surface/90 shadow-sm">
             <div className="flex items-center gap-2 px-3 sm:px-4 lg:px-8 h-topbar">
-              <Link to={home} aria-label="SuwaPath home">
+              {/* Mark only below lg — the desktop sidebar already shows the
+                  full Brand, and rendering both put two logos side by side. */}
+              <Link to={home} className="lg:hidden" aria-label="SuwaPath home">
                 <Brand variant="mark" />
               </Link>
 
@@ -361,7 +363,7 @@ export default function AppShell() {
           className={
             fullBleed
               ? "flex-1 min-h-0 w-full h-screen overflow-hidden"
-              : "flex-1 min-w-0 p-3 sm:p-4 lg:p-8 pt-[calc(var(--sp-topbar-h)+0.75rem)] sm:pt-[calc(var(--sp-topbar-h)+1rem)] pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
+              : "flex-1 min-w-0 p-3 sm:p-4 lg:p-8 pt-[calc(var(--sp-topbar-h)+0.75rem)] sm:pt-[calc(var(--sp-topbar-h)+1rem)] lg:pt-[calc(var(--sp-topbar-h)+2rem)] pb-[calc(var(--sp-bottomnav-h)+1rem)] lg:pb-8 max-w-[1600px] w-full mx-auto"
           }
         >
           <Outlet />
