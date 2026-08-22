@@ -8,6 +8,8 @@ __pycache__/
 node_modules/
 dist/
 .vite/
+.npm-cache/
+frontend/.npm-cache/
 
 # Environment
 .env

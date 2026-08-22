@@ -20,9 +20,12 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import Markdown from "../../components/Markdown";
 import ProviderDeck, { type ProviderCard } from "../../components/ProviderDeck";
 import {
+  Avatar,
+  Brand,
   Card,
   Chip,
   ErrorNote,
@@ -504,106 +507,145 @@ export default function Assistant() {
 
   return (
     <div className="flex h-full min-h-0">
-      {/* ---------------- History panel ----------------
-          An overlay from the right, opened from the corner button, rather than
-          a rail that occupies the page while you type. Frosted rather than
-          opaque so the conversation stays visible behind it — the panel is a
-          temporary lookup, not a place you navigate to. */}
+      {/* ---------------- Left Chatbot History Sidebar ---------------- */}
+      {/* Mobile backdrop */}
       {showHistory && (
         <div
-          className="fixed inset-0 z-30 bg-ink-900/30 backdrop-blur-[2px]"
+          className="fixed inset-0 z-30 bg-ink-900/30 backdrop-blur-[2px] lg:hidden"
           onClick={() => setShowHistory(false)}
           aria-hidden
         />
       )}
+
       <aside
         className={`
-          fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] border-l border-white/40
-          bg-surface/80 shadow-2xl backdrop-blur-xl transition-transform duration-200
-          supports-[backdrop-filter]:bg-surface/70
-          ${showHistory ? "translate-x-0" : "translate-x-full"}
+          fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] border-r border-line
+          bg-surface shadow-2xl transition-transform duration-200 lg:static
+          lg:z-auto lg:w-72 lg:shrink-0 lg:shadow-none lg:translate-x-0
+          flex flex-col h-full
+          ${showHistory ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
         `}
-        aria-hidden={!showHistory}
       >
-        <div className="flex h-full flex-col p-3">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => reset(false)}
-              className="sp-btn sp-btn-primary flex-1 justify-center"
-            >
-              <Icon name="add" size={16} />
-              New chat
-            </button>
+        <div className="flex h-full flex-col p-3.5">
+          {/* Top Logo & mobile close */}
+          <div className="flex items-center justify-between pb-3 border-b border-line">
+            <Link to="/patient" aria-label="SuwaPath home" className="hover:opacity-90 transition">
+              <Brand />
+            </Link>
             <button
               onClick={() => setShowHistory(false)}
-              aria-label="Close history"
-              className="sp-btn sp-btn-ghost !px-2"
+              aria-label="Close menu"
+              className="lg:hidden sp-btn sp-btn-ghost !px-2 text-ink-500"
             >
               <Icon name="close" size={18} />
             </button>
           </div>
-          {/* Private chats never appear in the list below, so reopening one
-              has to be an explicit action rather than a row to click. */}
-          <button
-            onClick={() => {
-              setShowHistory(false);
-              setResumePrompt(true);
-            }}
-            className="sp-btn sp-btn-ghost sp-btn-block mt-2 justify-center text-sm"
-          >
-            <Icon name="lock" size={15} />
-            Resume a private chat
-          </button>
 
-          <p className="mb-1.5 mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
-            Recent
+          {/* Actions */}
+          <div className="pt-3.5 space-y-2">
+            <button
+              onClick={() => reset(false)}
+              className="sp-btn sp-btn-primary w-full justify-center gap-2 shadow-sm"
+            >
+              <Icon name="add" size={17} />
+              New chat
+            </button>
+            <button
+              onClick={() => {
+                setShowHistory(false);
+                setResumePrompt(true);
+              }}
+              className="sp-btn sp-btn-ghost sp-btn-block justify-center text-sm gap-1.5 text-ink-600 hover:text-ink-900"
+            >
+              <Icon name="lock" size={15} />
+              Resume a private chat
+            </button>
+          </div>
+
+          {/* History List */}
+          <p className="mb-1.5 mt-5 px-1 text-[11px] font-bold uppercase tracking-wider text-ink-400">
+            Recent Chats
           </p>
-          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+          <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
             {sessions.length === 0 && (
-              <p className="px-1 py-2 text-sm text-ink-400">
+              <p className="px-2 py-3 text-sm text-ink-400 italic text-center">
                 Your conversations will appear here.
               </p>
             )}
             {sessions.map((session) => (
               <div
                 key={session.id}
-                className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition ${
+                className={`group flex items-center gap-1 rounded-xl px-3 py-2 text-sm transition ${
                   session.id === sessionId
-                    ? "bg-brand-50 text-brand-800"
-                    : "text-ink-700 hover:bg-canvas"
+                    ? "bg-brand-50 text-brand-800 font-medium shadow-xs"
+                    : "text-ink-700 hover:bg-ink-50"
                 }`}
               >
                 <button
-                  onClick={() => void openSession(session.id)}
+                  onClick={() => {
+                    void openSession(session.id);
+                    setShowHistory(false);
+                  }}
                   className="min-w-0 flex-1 text-left"
                 >
                   <span className="block truncate">{session.title}</span>
-                  <span className="block text-xs text-ink-400">
+                  <span className="block text-[11px] text-ink-400 font-normal">
                     {relativeDay(session.last_message_at)}
                   </span>
                 </button>
                 <button
                   onClick={() => void deleteSession(session.id)}
                   aria-label="Delete conversation"
-                  className="text-ink-400 opacity-0 transition hover:text-danger-text focus:opacity-100 group-hover:opacity-100"
+                  className="text-ink-400 opacity-0 transition hover:text-danger-text focus:opacity-100 group-hover:opacity-100 p-1"
                 >
                   <Icon name="delete" size={15} />
                 </button>
               </div>
             ))}
           </div>
+
+          {/* Sidebar Footer — Back to Dashboard */}
+          <div className="pt-3 border-t border-line space-y-2">
+            <Link
+              to="/patient"
+              className="sp-btn sp-btn-ghost w-full justify-start gap-2 text-ink-700 hover:bg-brand-50 hover:text-brand-700 font-medium"
+            >
+              <Icon name="arrowBack" size={17} />
+              <span>Back to Dashboard</span>
+            </Link>
+
+            <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg bg-ink-50/80">
+              <Avatar name={user?.full_name ?? "User"} size={30} />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-ink-900 truncate">
+                  {user?.full_name}
+                </p>
+                <p className="text-[10px] text-ink-500 truncate">Patient</p>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
 
-      {/* ---------------- Conversation ---------------- */}
+      {/* ---------------- Main Conversation Workspace ---------------- */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b border-line px-3 py-2.5 sm:px-4">
+        {/* Workspace Top Header */}
+        <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-2.5 sm:px-5 shrink-0">
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className="lg:hidden sp-btn sp-btn-ghost !px-2 text-ink-600"
+            title="Toggle recent chats"
+          >
+            <Icon name="sidebarOpen" size={20} />
+          </button>
+
           <div className="min-w-0">
             <h1 className="sp-heading truncate text-base">SuwaPath Assistant</h1>
-            <p className="hidden truncate text-xs text-ink-500 sm:block">
+            <p className="hidden truncate text-xs text-ink-500 md:block">
               Symptoms, reports, appointments — all in one conversation.
             </p>
           </div>
+
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {isPrivate && (
               <span className="flex items-center gap-1 rounded-full bg-programme-surface px-2.5 py-1 text-xs font-medium text-programme-text">
@@ -611,6 +653,7 @@ export default function Assistant() {
                 Private
               </span>
             )}
+
             <button
               onClick={() => reset(false)}
               className="sp-btn sp-btn-ghost sp-btn-sm"
@@ -619,17 +662,15 @@ export default function Assistant() {
               <Icon name="add" size={16} />
               <span className="hidden sm:inline">New</span>
             </button>
-            {/* History lives behind a button in the corner rather than in a
-                permanent rail: the conversation is the page, and a list of
-                past ones does not need to be on screen while you type. */}
-            <button
-              onClick={() => setShowHistory(true)}
-              className="sp-btn sp-btn-ghost sp-btn-sm"
-              title="Conversation history"
+
+            <Link
+              to="/patient"
+              className="sp-btn sp-btn-secondary sp-btn-sm gap-1.5"
+              title="Exit to Dashboard"
             >
-              <Icon name="history" size={16} />
-              <span className="hidden sm:inline">History</span>
-            </button>
+              <Icon name="arrowBack" size={15} />
+              <span className="hidden sm:inline">Dashboard</span>
+            </Link>
           </div>
         </div>
 

@@ -41,65 +41,88 @@ export default function Login() {
   }
 
   return (
-    <div className="h-[100dvh] lg:h-auto lg:min-h-screen bg-white lg:bg-[#f8fafc] flex flex-col justify-center items-center lg:py-8 lg:px-8 overflow-hidden lg:overflow-visible">
-      <div className="w-full max-w-[1000px] h-full lg:h-auto bg-white lg:rounded-3xl lg:shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden lg:grid lg:grid-cols-2 flex flex-col">
-        
+    /* The whole screen is exactly one viewport tall and never scrolls as a
+       page: on desktop the card is capped to the viewport, on mobile the
+       artwork flexes and only the bottom sheet scrolls if it has to. */
+    <div className="h-[100dvh] overflow-hidden bg-[#f4fbfa] lg:bg-[#f8fafc] flex flex-col lg:items-center lg:justify-center lg:p-6">
+      <div className="w-full max-w-[1000px] h-full lg:h-auto lg:max-h-[calc(100dvh-3rem)] bg-transparent lg:bg-white lg:rounded-3xl lg:shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden lg:grid lg:grid-cols-2 flex flex-col min-h-0">
+
         {/* Left panel (Desktop only) */}
-        <div className="hidden lg:flex flex-col items-center justify-center pt-12 px-12 bg-[#f4fbfa] relative overflow-hidden">
-          <div className="max-w-md text-center z-10 w-full flex flex-col items-center flex-1">
-            <div className="flex flex-col items-center justify-center shrink-0 mb-8 mt-4">
-              <img src="/brand/mark.png" alt="SuwaPath Icon" className="h-[100px] w-auto object-contain mb-5" />
-              <h1 className="text-[34px] font-bold text-[#0a2e56]">
+        <div className="hidden lg:flex flex-col items-center pt-10 px-10 bg-[#f4fbfa] relative overflow-hidden min-h-0">
+          <div className="max-w-md text-center z-10 w-full flex flex-col items-center flex-1 min-h-0">
+            <div className="flex flex-col items-center justify-center shrink-0 mb-6">
+              <img src="/brand/mark.png" alt="SuwaPath Icon" className="h-[clamp(56px,9vh,92px)] w-auto object-contain mb-4" />
+              <h1 className="text-[clamp(24px,3.2vh,32px)] font-bold text-[#0a2e56]">
                 SuwaPath <span className="text-[#0a2e56] font-medium mx-1">-</span> <span className="text-[#00a7b3]">සුවපත්</span>
               </h1>
             </div>
-            <h2 className="text-[28px] font-bold text-[#0a2e56] mb-3">Care. Connect. Empower.</h2>
-            <p className="text-ink-600 mb-8 text-[17px]">
+            <h2 className="text-[clamp(20px,2.8vh,27px)] font-bold text-[#0a2e56] mb-2 shrink-0">Care. Connect. Empower.</h2>
+            <p className="text-ink-600 mb-4 text-[clamp(14px,1.9vh,17px)] shrink-0">
               Your trusted healthcare companion for smarter appointments, better records, and improved wellbeing.
             </p>
-            <div className="w-full relative flex justify-center mt-auto pb-8">
+            <div className="w-full relative flex justify-center items-end flex-1 min-h-0 pb-6">
               <img
                 src={loginIllustration.desktop}
                 alt=""
                 aria-hidden
                 loading="eager"
-                className="w-[125%] max-w-none mix-blend-multiply"
+                className="w-[125%] max-w-none max-h-full object-contain object-bottom mix-blend-multiply"
               />
             </div>
           </div>
         </div>
 
-        {/* Right Form panel (and Mobile view) */}
-        <div className="flex flex-col justify-center p-5 sm:p-12 relative w-full h-full lg:h-auto overflow-hidden lg:overflow-visible flex-1">
-          {/* Mobile top section */}
-          <div className="lg:hidden w-full text-center flex flex-col items-center shrink min-h-0 mt-2 sm:mt-6">
-            <div className="flex flex-col items-center justify-center shrink-0 mb-3 sm:mb-6">
-              <img src="/brand/mark.png" alt="SuwaPath Icon" className="h-[72px] sm:h-[84px] w-auto object-contain mb-3 sm:mb-4" />
-              <h1 className="text-[22px] sm:text-[26px] font-bold text-[#0a2e56]">
+        {/* Right form panel on desktop; hero + bottom sheet on mobile. */}
+        <div className="flex flex-col w-full h-full lg:h-auto min-h-0 overflow-hidden lg:justify-center lg:p-10">
+          {/* Mobile hero — takes whatever height the sheet leaves it. */}
+          {/* The hero takes a fixed share of the screen rather than "whatever
+              the sheet leaves", so a tall sheet (narrow phone, wrapped demo
+              labels) can never squeeze the artwork down to a thumbnail. */}
+          <div className="lg:hidden w-full text-center flex flex-col items-center shrink-0 h-[32dvh] min-h-0 px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2 [@media(max-height:700px)]:h-auto lg:h-auto">
+            <div className="flex flex-col items-center justify-center shrink-0">
+              <img src="/brand/mark.png" alt="SuwaPath Icon" className="h-[clamp(44px,7.5vh,76px)] w-auto object-contain mb-2" />
+              <h1 className="text-[clamp(18px,2.6vh,24px)] font-bold text-[#0a2e56]">
                 SuwaPath <span className="text-[#0a2e56] font-medium mx-1">-</span> <span className="text-[#00a7b3]">සුවපත්</span>
               </h1>
             </div>
-            <h2 className="text-[24px] sm:text-[28px] font-bold text-[#0a2e56] shrink-0 leading-tight">Welcome back <span className="text-brand-500 font-normal">♡</span></h2>
-            <p className="text-ink-500 mt-1 sm:mt-2 text-[13px] sm:text-[15px] px-2 leading-snug shrink-0">Sign in to access your health journey and care, all in one place.</p>
-            <div className="shrink min-h-0 flex-1 w-full max-w-[340px] flex items-center justify-center py-2 lg:py-6">
+            <p className="text-ink-500 mt-1 text-[clamp(11px,1.7vh,14px)] px-2 leading-snug shrink-0 [@media(max-height:700px)]:hidden">
+              Your health journey and care, all in one place.
+            </p>
+            {/* On short phones the artwork would be squeezed down to a
+                thumbnail, which looks broken rather than decorative — below
+                that height it steps aside so the sheet gets the room. */}
+            <div className="flex-1 min-h-0 w-full max-w-[min(88%,420px)] flex items-center justify-center py-2 [@media(max-height:700px)]:hidden">
               <img
                 src={loginIllustration.mobile}
                 alt=""
                 aria-hidden
                 loading="eager"
-                className="w-full max-h-full object-contain mix-blend-multiply"
+                className="w-full h-full max-h-full object-contain mix-blend-multiply"
               />
             </div>
           </div>
 
-          <div className="w-full max-w-sm mx-auto flex flex-col shrink-0 lg:my-auto">
-            <div className="hidden lg:block mb-8 text-center lg:text-left">
-              <h2 className="text-[2rem] leading-tight font-bold text-[#0a2e56]">Welcome back</h2>
-              <p className="text-ink-500 mt-2 text-base">Sign in to continue to SuwaPath</p>
+          {/* Bottom sheet on mobile; plain column on desktop. The sheet is the
+              only scrollable region, so the page itself never moves. */}
+          {/* The sheet runs edge to edge, but its contents stay at a readable
+              column width — the side padding grows to absorb the extra space
+              on wider phones and tablets. */}
+          <div className="w-full mx-auto flex flex-col flex-1 min-h-0 overflow-y-auto overscroll-contain bg-white rounded-t-[28px] shadow-[0_-6px_24px_rgba(10,46,86,0.10)] px-[max(1.25rem,calc((100%-24rem)/2))] pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] lg:max-w-sm lg:flex-none lg:overflow-visible lg:rounded-none lg:shadow-none lg:bg-transparent lg:p-0 lg:my-auto">
+            {/* Sheet grab handle, mobile only. */}
+            <div className="lg:hidden mx-auto mb-3 h-1 w-10 shrink-0 rounded-full bg-ink-200" aria-hidden />
+
+            <div className="lg:hidden text-center shrink-0">
+              <h2 className="text-[22px] font-bold text-[#0a2e56] leading-tight">Welcome back</h2>
+              <p className="text-ink-500 mt-0.5 text-[13px]">Sign in to continue to SuwaPath</p>
+            </div>
+
+            <div className="hidden lg:block mb-6 text-center lg:text-left">
+              <h2 className="text-[clamp(24px,3.6vh,32px)] leading-tight font-bold text-[#0a2e56]">Welcome back</h2>
+              <p className="text-ink-500 mt-1.5 text-[15px]">Sign in to continue to SuwaPath</p>
             </div>
 
             <form
-              className="mt-1 lg:mt-6 space-y-3 lg:space-y-5"
+              className="mt-3 lg:mt-0 space-y-3 lg:space-y-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 void submit();
@@ -151,7 +174,7 @@ export default function Login() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between mt-3 lg:mt-5 pb-1 lg:pb-2">
+              <div className="flex items-center justify-between mt-3 lg:mt-4 pb-1 lg:pb-1">
                 <label className="flex items-center gap-2.5 cursor-pointer group">
                   <input
                     type="checkbox"
@@ -176,7 +199,7 @@ export default function Login() {
               </button>
             </form>
 
-            <div className="mt-4 lg:mt-8 flex items-center justify-center">
+            <div className="mt-4 lg:mt-5 flex items-center justify-center shrink-0">
               <div className="h-px bg-ink-100 flex-1"></div>
               <span className="px-4 text-[12px] lg:text-[13px] text-ink-500 font-medium lowercase">or</span>
               <div className="h-px bg-ink-100 flex-1"></div>
@@ -188,7 +211,7 @@ export default function Login() {
                 them on screen costs nothing and saves a reviewer from having
                 to go looking. Clicking fills the form rather than signing in,
                 so the normal login path is still the one being exercised. */}
-            <div className="mt-4 lg:mt-6">
+            <div className="mt-4 lg:mt-4 shrink-0">
               <p className="text-[12px] lg:text-[13px] text-ink-500 text-center mb-2">
                 Explore with a demo account — synthetic data
               </p>
@@ -215,12 +238,12 @@ export default function Login() {
               </div>
             </div>
 
-            <p className="mt-4 lg:mt-8 mb-2 lg:mb-0 text-center text-[13px] lg:text-[15px] text-ink-600">
+            <p className="mt-4 lg:mt-5 text-center text-[12px] lg:text-[14px] text-ink-600 shrink-0">
               Sign-up is not open in this preview — use a demo account above.
             </p>
 
             {/* Mobile security note */}
-            <div className="lg:hidden mt-3 mb-2 flex items-center justify-center gap-1.5 text-[11px] text-ink-500">
+            <div className="lg:hidden mt-3 flex shrink-0 items-center justify-center gap-1.5 text-[11px] text-ink-500">
               <Icon name="verified" size={14} className="text-brand-600" />
               <span className="font-medium">Your health data is secure and private.</span>
             </div>

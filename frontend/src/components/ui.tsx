@@ -112,33 +112,37 @@ export function Card({
   bodyClassName?: string;
 }) {
   return (
-    <section className={`sp-card ${className}`}>
+    /* A column whose body grows: side-by-side cards are stretched to the
+       tallest in their grid row, and without this the extra height collects
+       as dead space under the shorter card's content instead of being space
+       the body can centre itself in. */
+    <section className={`sp-card flex flex-col ${className}`}>
       {(title || action) && (
-        <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 p-4 sm:p-5 pb-0 sm:pb-0">
-          <div className="flex items-start gap-2.5 min-w-0">
+        <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 p-3.5 sm:p-5 pb-0 sm:pb-0">
+          <div className="flex items-start gap-2.5 min-w-0 flex-1">
             {icon && (
-              <span className="sp-icon-tile bg-brand-50 text-brand-700 !h-8 !w-8">
+              <span className="sp-icon-tile bg-brand-50 text-brand-700 !h-8 !w-8 shrink-0">
                 <Icon name={icon} size={18} />
               </span>
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               {/* Titles wrap rather than ellipsize: a card header is short on
                   space in a multi-column grid, and a truncated heading reads
                   worse than one that wraps to a second line. */}
               {title && (
-                <h2 className="sp-heading text-base">
+                <h2 className="sp-heading text-base break-words">
                   {title}
                 </h2>
               )}
               {subtitle && (
-                <p className="text-sm text-ink-500 mt-0.5">{subtitle}</p>
+                <p className="text-sm text-ink-500 mt-0.5 break-words">{subtitle}</p>
               )}
             </div>
           </div>
           {action && <div className="shrink-0">{action}</div>}
         </header>
       )}
-      <div className={`p-4 sm:p-5 ${bodyClassName}`}>{children}</div>
+      <div className={`flex-1 flex flex-col min-w-0 p-4 sm:p-5 ${bodyClassName}`}>{children}</div>
     </section>
   );
 }
@@ -247,13 +251,13 @@ export function Empty({
   action?: ReactNode;
 }) {
   return (
-    <div className="text-center py-10 px-4">
-      <span className="sp-icon-tile mx-auto bg-ink-100 text-ink-400 !h-12 !w-12">
+    <div className="w-full flex-1 flex flex-col items-center justify-center text-center py-6 sm:py-8 px-2 my-auto self-center">
+      <div className="sp-icon-tile bg-ink-100 text-ink-400 !h-12 !w-12 shrink-0 flex items-center justify-center">
         <Icon name={icon} size={24} />
-      </span>
-      <p className="font-medium text-ink-700 mt-3">{title}</p>
-      {hint && <p className="text-sm text-ink-500 mt-1 max-w-sm mx-auto">{hint}</p>}
-      {action && <div className="mt-4">{action}</div>}
+      </div>
+      <p className="font-medium text-ink-700 mt-3 break-words max-w-full text-center">{title}</p>
+      {hint && <p className="text-sm text-ink-500 mt-1 max-w-sm text-center break-words">{hint}</p>}
+      {action && <div className="mt-4 text-center">{action}</div>}
     </div>
   );
 }
@@ -343,8 +347,8 @@ export function Confidence({
 export function AiNotice({ children }: { children: ReactNode }) {
   return (
     <p className="text-xs text-ink-500 flex items-start gap-1.5 mt-3">
-      <Icon name="info" size={14} className="mt-px" />
-      <span>{children}</span>
+      <Icon name="info" size={14} className="mt-px shrink-0" />
+      <span className="min-w-0 flex-1 break-words">{children}</span>
     </p>
   );
 }
