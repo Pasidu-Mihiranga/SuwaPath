@@ -1,12 +1,22 @@
 # Production stack for the VPS. Lives at /opt/suwapath/docker-compose.yml.
 #
-# Only Caddy publishes host ports (80/443). Postgres, Qdrant and the backend
-# are reachable only on this compose's internal network, so there is nothing
-# else on the box to firewall.
+# This box already runs nginx + certbot fronting three other apps
+# (agentkap, auditra, faceid), each as its own vhost in
+# /etc/nginx/sites-available. SuwaPath follows the same convention instead
+# of introducing a second reverse proxy that would fight nginx for
+# ports 80/443: the backend publishes only to 127.0.0.1:8020, and the
+# suwapath.pasidumihiranga.me nginx vhost (set up once, outside of this
+# compose file) proxies /api, /docs, /health etc. there and serves
+# ./frontend/dist directly for everything else, with TLS from certbot.
 #
 # /opt/suwapath/.env holds POSTGRES_*, DATABASE_URL, JWT_SECRET,
 # SUWAPATH_ENCRYPTION_KEY etc. It is written once during provisioning and is
 # never touched by CI or committed to git.
+#
+# backend_storage is a bind mount, not a named volume: Docker creates named
+# volumes root-owned, and the backend runs as uid 1000 (see Dockerfile) —
+# writing to a root-owned directory fails on first boot. /opt/suwapath/data
+# is chown'd to 1000:1000 once during provisioning.
 
 services:
   postgres:
@@ -35,31 +45,16 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    ports:
+      - "127.0.0.1:8020:7860"
     volumes:
-      - backend_storage:/home/app/data
+      - ./data:/home/app/data
     depends_on:
       postgres:
         condition: service_healthy
       qdrant:
         condition: service_started
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./frontend/dist:/srv/frontend:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - backend
-
 volumes:
   pgdata:
   qdrant_storage:
-  backend_storage:
-  caddy_data:
-  caddy_config:
