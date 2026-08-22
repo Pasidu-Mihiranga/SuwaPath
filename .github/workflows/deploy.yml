@@ -78,7 +78,7 @@ jobs:
           name: frontend-dist
           path: frontend-dist
 
-      - name: Sync compose files and frontend build to the VPS
+      - name: Sync compose file and frontend build to the VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -98,7 +98,6 @@ jobs:
             set -e
             cd /opt/suwapath
             mv deploy/docker-compose.yml docker-compose.yml
-            mv deploy/Caddyfile Caddyfile
             rm -rf frontend/dist
             mkdir -p frontend
             mv frontend-dist frontend/dist
