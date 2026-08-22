@@ -119,7 +119,7 @@ export function ProposalCard({
         >
           Not now
         </button>
-        <p className="ml-auto text-xs text-ink-500">
+        <p className="text-xs text-ink-500 sm:ml-auto w-full sm:w-auto">
           Nothing happens until you choose.
         </p>
       </div>
