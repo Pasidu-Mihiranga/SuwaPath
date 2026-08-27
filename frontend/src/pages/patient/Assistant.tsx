@@ -135,6 +135,36 @@ export default function Assistant() {
   const fileRef = useRef<HTMLInputElement>(null);
   const listenerRef = useRef<voice.Listener | null>(null);
 
+  // Whether this patient should be offered spoken replies as a matter of
+  // course. True for the elderly and maternal pathways, and for anyone who
+  // has turned on large text — all three are people who told us, one way or
+  // another, that reading the screen is the hard part.
+  const [spokenCare, setSpokenCare] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get("/patients/me/dashboard")
+      .then(({ data }) => {
+        if (cancelled) return;
+        const pathways = new Set(
+          (data?.care_programmes ?? []).map((p: any) => String(p?.type)),
+        );
+        setSpokenCare(
+          Boolean(data?.patient?.accessibility_large_text)
+            || pathways.has("elderly")
+            || pathways.has("maternal")
+            || pathways.has("postpartum"),
+        );
+      })
+      .catch(() => {
+        /* an accessibility affordance must never block the chat */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Resolved once: a microphone button that does nothing is worse than none.
   const canListen = voice.listeningSupported();
   const canSpeak = voice.speechSupported();
@@ -703,6 +733,9 @@ export default function Assistant() {
                 onPick={pickProvider}
                 canSpeak={canSpeak}
                 language={user?.preferred_language ?? "en"}
+                // Only the newest reply, so a long conversation does not end
+                // up with a column of identical faces down the page.
+                spokenCare={spokenCare && index === turns.length - 1}
               />
             ))}
 
@@ -1223,11 +1256,13 @@ function TurnBubble({
   onPick,
   canSpeak,
   language,
+  spokenCare = false,
 }: {
   turn: Turn;
   onPick: (provider: ProviderCard) => void;
   canSpeak: boolean;
   language: string;
+  spokenCare?: boolean;
 }) {
   if (turn.role === "user") {
     return (
@@ -1257,14 +1292,25 @@ function TurnBubble({
   return (
     <div className="flex justify-start">
       <div className="min-w-0 max-w-[92%] space-y-2">
-        {urgency === "emergency" && escalation && (
+        {urgency === "emergency" && escalation ? (
           <DoctorAvatar
+            variant="emergency"
             message={escalation}
             ruleIds={firedRules}
             urgency={urgency}
             language={language}
           />
-        )}
+        ) : spokenCare ? (
+          // The everyday case, and the one this feature is really for: a
+          // patient on the elderly or maternal pathway, or anyone who turned
+          // on large text, gets every reply offered aloud rather than only
+          // the emergencies. It does not speak unprompted — see `autoSpeak`.
+          <DoctorAvatar
+            variant="care"
+            message={turn.content}
+            language={language}
+          />
+        ) : null}
         <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3 text-ink-800">
           <Markdown content={turn.content} />
         </div>
