@@ -310,6 +310,9 @@ def pre_consultation_summary(
                 "medications": intake.medications,
                 "allergies": intake.allergies,
                 "negative_findings": intake.negative_findings,
+                # What the rule engine matched on. Shown so the doctor sees
+                # the basis for the urgency, not only the verdict.
+                "potential_red_flags": intake.potential_red_flags,
                 "extraction_source": intake.extraction_source,
                 "extraction_confidence": intake.extraction_confidence,
                 "recorded_at": intake.created_at,
