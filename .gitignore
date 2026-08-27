@@ -55,3 +55,6 @@ SuwaPath_AI_Battle_Phase02.pptx
 SuwaPath_Pitch_AI_Battle.pptx
 .gitignore
 SuwaPath_Pitch_Deck.pdf
+
+# Evaluation checkpoints (regenerate with: python -m app.eval.harness)
+backend/app/eval/results*.json
