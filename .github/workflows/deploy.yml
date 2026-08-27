@@ -137,5 +137,27 @@ jobs:
             rmdir deploy 2>/dev/null || true
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose pull backend
+
+            # Postgres first, and wait for it. The migration and the backend
+            # both need it, and `up -d` returning does not mean it is ready.
+            docker compose up -d postgres
+            for i in $(seq 1 30); do
+              if docker compose exec -T postgres pg_isready -q; then break; fi
+              sleep 2
+            done
+
+            # Schema migration, before the new backend serves a request.
+            #
+            # There is no shell access to this host, so this is the only place
+            # it can run. It is idempotent and additive - it widens columns
+            # that now hold ciphertext and adds the audit hash columns - so
+            # running it on every deploy is safe and a no-op once applied.
+            #
+            # Run against the NEW image, not the running one: the migration
+            # belongs to the code being deployed, and the old container does
+            # not have it.
+            docker compose run --rm --no-deps backend \
+              python scripts/encrypt_phi_columns.py --apply
+
             docker compose up -d
             docker image prune -f
