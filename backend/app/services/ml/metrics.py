@@ -178,6 +178,139 @@ def evaluate(y_true, y_score, *, bins: int = 10) -> Evaluation:
     )
 
 
+# --------------------------------------------------------------------------
+# Classification metrics — for triage, where the output is a label not a score
+# --------------------------------------------------------------------------
+# The functions above all assume a probability. The symptom checker emits an
+# urgency *class*, and its errors are wildly asymmetric: routing an emergency
+# to "book an appointment" can kill someone, while routing a sore throat to
+# A&E wastes an afternoon. So the headline number here is recall on the
+# emergency class, with specificity reported as the price paid for it — the
+# same shape as the pneumonia model's `min_recall_target` operating point.
+
+
+@dataclass
+class BinaryOutcome:
+    """One class treated as positive, everything else negative."""
+
+    label: str
+    tp: int = 0
+    fp: int = 0
+    tn: int = 0
+    fn: int = 0
+
+    @property
+    def support(self) -> int:
+        return self.tp + self.fn
+
+    @property
+    def recall(self) -> float | None:
+        """Of the cases that really were this class, how many did we catch?"""
+        denominator = self.tp + self.fn
+        return self.tp / denominator if denominator else None
+
+    @property
+    def precision(self) -> float | None:
+        denominator = self.tp + self.fp
+        return self.tp / denominator if denominator else None
+
+    @property
+    def specificity(self) -> float | None:
+        """Of the cases that were not this class, how many did we leave alone?"""
+        denominator = self.tn + self.fp
+        return self.tn / denominator if denominator else None
+
+    @property
+    def f1(self) -> float | None:
+        p, r = self.precision, self.recall
+        if p is None or r is None or (p + r) == 0:
+            return None
+        return 2 * p * r / (p + r)
+
+    def to_dict(self) -> dict:
+        def rounded(value: float | None) -> float | None:
+            return round(value, 4) if value is not None else None
+
+        return {
+            "label": self.label,
+            "support": self.support,
+            "tp": self.tp, "fp": self.fp, "tn": self.tn, "fn": self.fn,
+            "recall": rounded(self.recall),
+            "precision": rounded(self.precision),
+            "specificity": rounded(self.specificity),
+            "f1": rounded(self.f1),
+        }
+
+
+def binary_outcome(y_true: list[str], y_pred: list[str], positive: str) -> BinaryOutcome:
+    """One-vs-rest counts for a single class."""
+    outcome = BinaryOutcome(label=positive)
+    for truth, prediction in zip(y_true, y_pred):
+        actually = truth == positive
+        predicted = prediction == positive
+        if actually and predicted:
+            outcome.tp += 1
+        elif actually:
+            outcome.fn += 1
+        elif predicted:
+            outcome.fp += 1
+        else:
+            outcome.tn += 1
+    return outcome
+
+
+def confusion_matrix(
+    y_true: list[str], y_pred: list[str], labels: list[str]
+) -> dict[str, dict[str, int]]:
+    """`matrix[actual][predicted] = count`, ordered by `labels`."""
+    matrix = {actual: {predicted: 0 for predicted in labels} for actual in labels}
+    for truth, prediction in zip(y_true, y_pred):
+        if truth in matrix and prediction in matrix[truth]:
+            matrix[truth][prediction] += 1
+    return matrix
+
+
+def accuracy(y_true: list[str], y_pred: list[str]) -> float | None:
+    if not y_true:
+        return None
+    hits = sum(1 for truth, prediction in zip(y_true, y_pred) if truth == prediction)
+    return hits / len(y_true)
+
+
+def under_triage_rate(
+    y_true: list[str], y_pred: list[str], severity: dict[str, int]
+) -> float | None:
+    """Fraction of cases sent to a *less* urgent level than they deserved.
+
+    Kept separate from plain accuracy because direction matters. A system that
+    is 90% accurate by sending emergencies to routine care is far worse than
+    one that is 80% accurate erring the other way, and a single accuracy
+    number cannot tell those apart.
+    """
+    if not y_true:
+        return None
+    misses = sum(
+        1
+        for truth, prediction in zip(y_true, y_pred)
+        if severity.get(prediction, 0) < severity.get(truth, 0)
+    )
+    return misses / len(y_true)
+
+
+def over_triage_rate(
+    y_true: list[str], y_pred: list[str], severity: dict[str, int]
+) -> float | None:
+    """Fraction escalated beyond what was warranted — the cost side."""
+    if not y_true:
+        return None
+    excess = sum(
+        1
+        for truth, prediction in zip(y_true, y_pred)
+        if severity.get(prediction, 0) > severity.get(truth, 0)
+    )
+    return excess / len(y_true)
+
+
 def time_split(rows: list, *, key, holdout: float = 0.25) -> tuple[list, list]:
     """Split chronologically, never randomly.
 
