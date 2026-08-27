@@ -228,6 +228,22 @@ def _prepare(db: Session, user: User, payload: AgentRequest) -> tuple[dict, Chat
         remembered = memory.recall(db, scope["subject_user_id"])
         if remembered:
             context["remembered"] = [f"{m.key.replace('_', ' ')}: {m.value}" for m in remembered]
+            # Clinical facts the patient told us also join the context the
+            # red-flag rules evaluate, not just the wording the model sees.
+            #
+            # Without this, someone who says "I'm diabetic" in conversation but
+            # has an empty profile is not treated as carrying cardiac risk, so
+            # chest pain that should be URGENT reads as routine. The profile is
+            # the more reliable source and stays first; memory only ever adds.
+            #
+            # Adding can only raise urgency, never lower it, which is the
+            # direction it is safe to be wrong in.
+            context["chronic_conditions"] = memory.merge_clinical(
+                context.get("chronic_conditions"), remembered, "chronic_condition"
+            )
+            context["allergies"] = memory.merge_clinical(
+                context.get("allergies"), remembered, "allergy"
+            )
 
     # An explicit request language wins; otherwise reply in whatever script
     # this message was written in, not the account's stored default — a

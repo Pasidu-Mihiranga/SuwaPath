@@ -414,7 +414,8 @@ CORPUS: list[KnowledgeDoc] = [
 # Imported at the bottom so `corpus_lk` can import KnowledgeDoc from here
 # without a circular import.
 from app.knowledge.corpus_lk import CORPUS_LK  # noqa: E402
+from app.knowledge.corpus_who import CORPUS_WHO  # noqa: E402
 
-CORPUS = [*CORPUS, *CORPUS_LK]
+CORPUS = [*CORPUS, *CORPUS_LK, *CORPUS_WHO]
 
 CORPUS_BY_ID = {doc.id: doc for doc in CORPUS}

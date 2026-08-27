@@ -100,9 +100,44 @@ class RetrievedDoc:
         }
 
 
+# Irregular forms a suffix rule cannot reach. Kept deliberately short: this is
+# a lookup for words where the patient's phrasing and the corpus's phrasing
+# genuinely differ, not a general lemmatiser.
+_LEMMA = {
+    "burnt": "burn", "burned": "burn", "burns": "burn",
+    "bitten": "bite", "bit": "bite", "bites": "bite",
+    "fell": "fall", "fallen": "fall", "falls": "fall",
+    "hurting": "pain", "hurts": "pain", "hurt": "pain", "aching": "pain",
+    "ache": "pain", "aches": "pain", "sore": "pain", "painful": "pain",
+    "bleeding": "bleed", "bled": "bleed",
+    "swollen": "swelling", "swelled": "swelling",
+    "children": "child", "teeth": "tooth", "feet": "foot",
+    "vomited": "vomiting", "vomit": "vomiting",
+    "breastfeed": "breastfeeding", "breastfed": "breastfeeding",
+    "pregnant": "pregnancy", "diabetic": "diabetes",
+}
+
+
+def _stem(token: str) -> str:
+    """Crude suffix stripping, so "headaches" matches "headache".
+
+    Not a real stemmer. A real one is a dependency this project does not need
+    for a corpus of this size, and the failure it is fixing is narrow: patients
+    write "burnt my hand" and the corpus says "burn", so the lexical index
+    scores zero on the one passage that answers them.
+    """
+    if token in _LEMMA:
+        return _LEMMA[token]
+    for suffix in ("ing", "ies", "es", "ed", "s"):
+        if len(token) > len(suffix) + 3 and token.endswith(suffix):
+            stem = token[: -len(suffix)]
+            return _LEMMA.get(stem, stem + "y" if suffix == "ies" else stem)
+    return token
+
+
 def _tokenise(text: str) -> list[str]:
     tokens = re.findall(r"[a-z0-9']+", (text or "").lower())
-    return [t for t in tokens if t not in _STOPWORDS and len(t) > 2]
+    return [_stem(t) for t in tokens if t not in _STOPWORDS and len(t) > 2]
 
 
 class _TfidfIndex:
@@ -214,12 +249,18 @@ class KnowledgeService:
     # process holds the embedded store — the entire knowledge base went
     # silently unreachable while still reporting itself healthy.
     #
-    # The TF-IDF figure is calibrated, not guessed: across six on-topic and
-    # four off-topic queries the lowest relevant score was 0.119 and the
-    # highest irrelevant was 0.133. They overlap, so there is no perfect
-    # split; 0.15 admits five of six relevant and rejects all four noise
-    # queries. Re-check it if the corpus grows substantially, since TF-IDF
-    # scores move with corpus size.
+    # The TF-IDF figure is calibrated, not guessed. Recalibrated after the
+    # corpus grew to 74 passages, which is exactly the re-check this comment
+    # used to warn was needed: scores had shifted and the same floor started
+    # rejecting correct answers.
+    #
+    # At that size, lexical matching alone was not merely mis-scoring but
+    # returning nonsense — "is it safe to breastfeed at night" retrieved the
+    # asthma passage, because no threshold fixes a vocabulary mismatch. Adding
+    # stemming to the tokeniser fixed the retrieval itself, and the numbers
+    # then separated cleanly: across nine on-topic queries the lowest score is
+    # 0.155 and across five off-topic queries the highest is 0.122, with every
+    # on-topic query returning the correct passage. 0.15 sits in that gap.
     MIN_RELEVANCE = 0.35
     MIN_RELEVANCE_TFIDF = 0.15
 
