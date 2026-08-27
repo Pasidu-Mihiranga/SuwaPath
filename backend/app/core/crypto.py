@@ -52,12 +52,19 @@ import os
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from app.core import key_provider
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 _ENV_VAR = "SUWAPATH_ENCRYPTION_KEY"
-_VERSION = "v1"
+# v1 is the original three-field token and is still what every stored row
+# uses. v2 adds the key id so a rotation can leave old ciphertext readable.
+# New writes through the envelope path use v2; `encrypt()` still emits v1 so
+# nothing changes for callers that have not opted in.
+_VERSION_V1 = "v1"
+_VERSION_V2 = "v2"
+_VERSION = _VERSION_V1  # what _encrypt_with emits
 _NONCE_BYTES = 12  # 96 bits, the size AES-GCM is specified for
 _PBKDF2_ROUNDS = 210_000  # OWASP's 2023 floor for PBKDF2-HMAC-SHA256
 
@@ -110,13 +117,27 @@ def _encrypt_with(key: bytes, plaintext: str) -> str:
     )
 
 
+def _split_token(token: str) -> tuple[str, str, str, str]:
+    """Return (version, key_id, nonce_b64, blob_b64) for either format.
+
+    ``v1.<nonce>.<blob>`` predates key ids and is what every currently stored
+    row uses. ``v2.<key_id>.<nonce>.<blob>`` carries the id of the key it was
+    written with, so rotation can add a key without rewriting anything.
+
+    Both must keep parsing. A version-aware rewrite that assumed three fields
+    would fail to read every chat message and private transcript already in
+    the database.
+    """
+    parts = token.split(".")
+    if len(parts) == 3 and parts[0] == _VERSION_V1:
+        return _VERSION_V1, key_provider.LocalKeyProvider.CURRENT_KEY_ID, parts[1], parts[2]
+    if len(parts) == 4 and parts[0] == _VERSION_V2:
+        return _VERSION_V2, parts[1], parts[2], parts[3]
+    raise DecryptionError("Not an encrypted value.")
+
+
 def _decrypt_with(key: bytes, token: str) -> str:
-    try:
-        version, nonce_b64, blob_b64 = token.split(".", 2)
-    except ValueError as exc:
-        raise DecryptionError("Not an encrypted value.") from exc
-    if version != _VERSION:
-        raise DecryptionError(f"Unknown ciphertext version {version!r}.")
+    _version, _key_id, nonce_b64, blob_b64 = _split_token(token)
     try:
         plaintext = AESGCM(key).decrypt(
             base64.urlsafe_b64decode(nonce_b64),
@@ -129,7 +150,39 @@ def _decrypt_with(key: bytes, token: str) -> str:
 
 
 def looks_encrypted(value: str) -> bool:
-    return value.startswith(f"{_VERSION}.")
+    return value.startswith((f"{_VERSION_V1}.", f"{_VERSION_V2}."))
+
+
+# --------------------------------------------------------------------------
+# Envelope path — key id carried in the ciphertext
+# --------------------------------------------------------------------------
+def encrypt_enveloped(plaintext: str) -> str:
+    """Encrypt with the current data key, recording which key was used.
+
+    Used by the encrypted column types. Unlike `encrypt()` this raises when no
+    key is configured rather than returning plaintext: a column declared
+    encrypted that silently stores readable text is the failure mode the whole
+    exercise exists to prevent. `EncryptedString` decides whether a keyless
+    deployment is acceptable, and it is the only place that decision is made.
+    """
+    key_id, key = key_provider.get_provider().current()
+    nonce = os.urandom(_NONCE_BYTES)
+    blob = AESGCM(key).encrypt(nonce, plaintext.encode(), None)
+    return ".".join(
+        (
+            _VERSION_V2,
+            key_id,
+            base64.urlsafe_b64encode(nonce).decode(),
+            base64.urlsafe_b64encode(blob).decode(),
+        )
+    )
+
+
+def decrypt_enveloped(token: str) -> str:
+    """Read a value written by `encrypt_enveloped`, or any v1 ciphertext."""
+    _version, key_id, _nonce, _blob = _split_token(token)
+    key = key_provider.get_provider().by_id(key_id)
+    return _decrypt_with(key, token)
 
 
 # --------------------------------------------------------------------------
