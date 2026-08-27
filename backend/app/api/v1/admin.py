@@ -475,3 +475,110 @@ def audit_logs(
             }
         )
     return out
+
+
+@router.get("/security")
+def security_status(
+    current_user: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Whether the safeguards are actually on, and whether the trail is intact.
+
+    A hash-chained audit log that nobody ever verifies provides no assurance —
+    the chain only means something if somebody checks it, and until now there
+    was no way to from the console. Same for break-glass: the override is
+    designed around after-the-fact review, which requires the overrides to be
+    visible somewhere.
+    """
+    from app.core import audit, crypto
+    from app.models.identity import BreakGlassAccess
+    from app.services.knowledge import knowledge_service
+
+    integrity = audit.verify(db)
+
+    pending = db.execute(
+        select(BreakGlassAccess)
+        .where(BreakGlassAccess.reviewed_at.is_(None))
+        .order_by(BreakGlassAccess.created_at.desc())
+        .limit(50)
+    ).scalars().all()
+
+    overrides = []
+    for grant in pending:
+        actor = db.get(User, grant.actor_user_id)
+        patient = db.get(User, grant.patient_user_id)
+        overrides.append({
+            "id": grant.id,
+            "actor_name": actor.full_name if actor else None,
+            "patient_name": patient.full_name if patient else None,
+            "reason": grant.reason,
+            "declared_at": grant.created_at,
+            "expires_at": grant.expires_at,
+            "still_active": grant.expires_at > datetime.now(timezone.utc),
+        })
+
+    retrieval = knowledge_service.stats()
+    return {
+        "encryption": {
+            "enabled": crypto.is_enabled(),
+            "note": (
+                "Patient records are encrypted at rest."
+                if crypto.is_enabled()
+                else "No key is set — records are stored in plaintext. "
+                     "Acceptable only for synthetic data."
+            ),
+        },
+        "audit_chain": {
+            "entries": integrity["entries"],
+            "verified": integrity["verified"],
+            # Entries written before the chain existed. Unverifiable rather
+            # than invalid — conflating the two would make the upgrade itself
+            # look like tampering.
+            "unchained": integrity["unchained"],
+            "intact": integrity["intact"],
+            "problems": integrity["problems"][:10],
+        },
+        "break_glass": {
+            "unreviewed": len(overrides),
+            "items": overrides,
+        },
+        "retrieval": {
+            "backend": retrieval.get("backend"),
+            "degraded": retrieval.get("degraded", False),
+            "fix": retrieval.get("fix"),
+        },
+    }
+
+
+@router.post("/security/break-glass/{grant_id}/review")
+def review_break_glass(
+    grant_id: str,
+    current_user: User = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Mark an emergency override as having been looked at.
+
+    The review is itself audited. An override that is quietly dismissed is
+    the same as one nobody looked at.
+    """
+    from app.core import audit
+    from app.models.identity import BreakGlassAccess
+
+    grant = db.get(BreakGlassAccess, grant_id)
+    if grant is None:
+        raise HTTPException(status_code=404, detail="Override not found.")
+
+    grant.reviewed_at = datetime.now(timezone.utc)
+    grant.reviewed_by_user_id = current_user.id
+    audit.record(
+        db,
+        action="break_glass.reviewed",
+        actor_user_id=current_user.id,
+        actor_role=str(current_user.role),
+        resource_type="break_glass",
+        resource_id=grant.id,
+        detail={"declared_by": grant.actor_user_id, "patient": grant.patient_user_id},
+        commit=False,
+    )
+    db.commit()
+    return {"reviewed": True, "id": grant.id}

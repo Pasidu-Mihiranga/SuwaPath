@@ -564,6 +564,150 @@ export function AdminAi() {
   );
 }
 
+/* -------------------------------------------------- Security & integrity */
+
+/**
+ * Whether the safeguards are on, and whether the trail can still be trusted.
+ *
+ * A hash-chained audit log nobody verifies provides no assurance — the chain
+ * only means something once somebody checks it. Same for break-glass: the
+ * override is designed around after-the-fact review, and review needs the
+ * overrides to be visible to someone.
+ */
+export function AdminSecurity() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    try {
+      const r = await api.get("/admin/security");
+      setData(r.data);
+    } catch (err) {
+      setError(errorMessage(err, "Could not read the security status."));
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void load(); }, []);
+
+  if (loading) return <Spinner />;
+  if (error) return <ErrorNote message={error} />;
+  if (!data) return <Empty title="Unavailable" />;
+
+  const chain = data.audit_chain;
+  const enc = data.encryption;
+  const glass = data.break_glass;
+
+  return (
+    <div className="space-y-5">
+      <header>
+        <h1 className="text-2xl font-bold text-ink-900">Security &amp; integrity</h1>
+        <p className="text-ink-500">
+          What is protecting patient records, and whether the trail is intact.
+        </p>
+      </header>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <p className="text-xs uppercase tracking-wide text-ink-400">Records at rest</p>
+          <p className={`mt-1 text-lg font-bold ${enc.enabled ? "text-ink-900" : "text-danger-text"}`}>
+            {enc.enabled ? "Encrypted" : "Plaintext"}
+          </p>
+          <p className="mt-1 text-xs text-ink-600">{enc.note}</p>
+        </Card>
+
+        <Card>
+          <p className="text-xs uppercase tracking-wide text-ink-400">Audit trail</p>
+          <p className={`mt-1 text-lg font-bold ${chain.intact ? "text-ink-900" : "text-danger-text"}`}>
+            {chain.intact ? "Verified intact" : "Tampering detected"}
+          </p>
+          <p className="mt-1 text-xs text-ink-600">
+            {chain.verified} entries verified
+            {chain.unchained > 0 && `, ${chain.unchained} predate the chain`}
+          </p>
+        </Card>
+
+        <Card>
+          <p className="text-xs uppercase tracking-wide text-ink-400">Emergency access</p>
+          <p className={`mt-1 text-lg font-bold ${glass.unreviewed ? "text-danger-text" : "text-ink-900"}`}>
+            {glass.unreviewed} to review
+          </p>
+          <p className="mt-1 text-xs text-ink-600">
+            Records opened without a care relationship.
+          </p>
+        </Card>
+      </div>
+
+      {!chain.intact && (
+        <Card title="Entries that no longer verify">
+          <p className="mb-2 text-sm text-danger-text">
+            Each of these was altered or removed after it was written. The
+            chain cannot say what it originally contained — only that it
+            changed.
+          </p>
+          <ul className="space-y-1.5 text-sm">
+            {chain.problems.map((p: any) => (
+              <li key={p.id} className="text-ink-700">
+                <span className="font-mono text-xs text-ink-500">{p.id.slice(0, 8)}</span>{" "}
+                <strong>{p.action}</strong> — {p.issue}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      {glass.items.length > 0 && (
+        <Card
+          title="Emergency access awaiting review"
+          subtitle="A clinician opened a record they had no care relationship with. The reason they gave is recorded."
+        >
+          <div className="space-y-3">
+            {glass.items.map((o: any) => (
+              <div key={o.id} className="rounded-xl border border-line p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink-900">
+                      {o.actor_name} opened {o.patient_name}
+                      {o.still_active && (
+                        <span className="ml-2 sp-chip bg-danger-surface text-danger-text">
+                          still active
+                        </span>
+                      )}
+                    </p>
+                    <p className="mt-1 text-sm text-ink-700">“{o.reason}”</p>
+                    <p className="mt-1 text-xs text-ink-500">
+                      {formatDateTime(o.declared_at)}
+                    </p>
+                  </div>
+                  <button
+                    className="sp-btn sp-btn-secondary sp-btn-sm"
+                    onClick={async () => {
+                      await api.post(`/admin/security/break-glass/${o.id}/review`);
+                      await load();
+                    }}
+                  >
+                    Mark reviewed
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card title="Retrieval">
+        <p className="text-sm text-ink-700">
+          Backend: <strong>{data.retrieval.backend}</strong>
+        </p>
+        {data.retrieval.degraded && (
+          <p className="mt-1 text-xs text-danger-text">{data.retrieval.fix}</p>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------- Audit log */
 
 export function AdminAudit() {

@@ -40,6 +40,7 @@ import {
 import {
   AdminAi,
   AdminAudit,
+  AdminSecurity,
   AdminFacilities,
   AdminOverview,
   AdminProviders,
@@ -136,6 +137,7 @@ export default function App() {
         <Route path="/admin/facilities" element={<AdminFacilities />} />
         <Route path="/admin/ai" element={<AdminAi />} />
         <Route path="/admin/audit" element={<AdminAudit />} />
+        <Route path="/admin/security" element={<AdminSecurity />} />
         <Route path="/admin/notifications" element={<Notifications />} />
         <Route path="/admin/profile" element={<Profile />} />
         <Route path="/admin/settings" element={<Settings />} />
