@@ -693,7 +693,22 @@ def seed_medications(
     if len(on_medication) > N_MEDICATION_PATIENTS:
         on_medication = rng.sample(on_medication, N_MEDICATION_PATIENTS)
 
+    # The primary demo patient is sampled like anyone else, so she frequently
+    # ended up with no medications at all and a dashboard that looked broken —
+    # the first account anyone logs into showing the least. She has
+    # hypothyroidism and iron-deficiency anaemia on file; these are what that
+    # actually looks like on a prescription.
+    if demo.get("patient") and demo["patient"] not in on_medication:
+        on_medication.insert(0, demo["patient"])
+
     for patient in on_medication:
+        if demo.get("patient") and patient.id == demo["patient"].id:
+            # Matched to her recorded conditions rather than sampled at
+            # random, so the demo record is internally consistent when a
+            # reviewer reads the profile and the medication list together.
+            add_medication(patient, ("Levothyroxine", "50 mcg", "Once daily before breakfast", ["07:00"]))
+            add_medication(patient, ("Ferrous sulphate", "200 mg", "Twice daily after meals", ["08:00", "20:00"]))
+            continue
         for spec in rng.sample(MEDICATION_POOL, rng.randint(1, 3)):
             add_medication(patient, spec)
 

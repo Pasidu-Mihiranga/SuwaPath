@@ -36,6 +36,7 @@ Built for **AI Buildathon 2026** · Team **Gmora** · SDG 3 — Good Health and 
 - [Design system](#design-system)
 - [Project structure](#project-structure)
 - [API overview](#api-overview)
+- [How it actually works — architecture Q&A](docs/ARCHITECTURE_QA.md)
 - [Testing and verification](#testing-and-verification)
 - [Measuring the triage itself](#measuring-the-triage-itself)
 - [Plugging in your own CV model](#plugging-in-your-own-cv-model)
@@ -287,8 +288,11 @@ flowchart LR
     C4 --> M
     C5 --> M
     C6 --> M
-    M --> J["judge<br/>deterministic"]:::det
-    J --> E2(("end")):::stop
+    M --> F["fulfil<br/>bounded ReAct loop<br/>4 steps · 6 calls · 12s"]:::ai
+    F --> J["judge<br/>deterministic"]:::det
+    J -->|soften| RV["revise<br/>one rewrite"]:::ai
+    RV --> J
+    J -->|allow or block| E2(("end")):::stop
 
     classDef det fill:#ecfdf3,stroke:#16a34a,color:#05603a
     classDef ai fill:#f6f4ff,stroke:#7c5cff,color:#5b21b6
