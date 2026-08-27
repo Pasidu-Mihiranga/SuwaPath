@@ -900,13 +900,41 @@ def fulfil_node(state: AgentState) -> dict:
     if providers:
         structured["providers"] = providers
 
+    # What one agent actually told another.
+    #
+    # This used to record `from: "loop", because: "step 2"`, which is true and
+    # useless — it says a lookup happened, not that the consultation's
+    # conclusion is what caused it. The handoff *is* the inter-agent
+    # communication in this design: the parallel branches cannot see each
+    # other, so the only place one agent's output becomes another's input is
+    # here. Recording what was passed makes that visible in the trace instead
+    # of leaving it as an implementation detail nobody can point at.
+    specialty_name = consult_state.get("specialty_name") or consult_state.get("specialty")
+    test_names = [t.get("name") for t in tests if t.get("name")]
+
+    def _why(tool: str) -> str:
+        if tool in ("find_care", "appointments") and specialty_name:
+            return f"the consultation concluded {specialty_name}"
+        if tool == "directory" and test_names:
+            return f"the consultation suggested {', '.join(test_names[:2])}"
+        if tool == "recommendation":
+            return "to read the recommendation already produced"
+        return "to complete the answer"
+
     handoffs = [
         {
             "tool": o.tool,
             "status": o.status,
-            "from": "loop",
-            "because": f"step {o.step}",
+            "from": "consult",
+            "to": o.tool,
+            "passed": (
+                specialty_name
+                if o.tool in ("find_care", "appointments")
+                else ", ".join(test_names[:2]) if o.tool == "directory" else None
+            ),
+            "because": _why(o.tool),
             "results": o.n_results,
+            "step": o.step,
         }
         for o in pad.observations
     ]
