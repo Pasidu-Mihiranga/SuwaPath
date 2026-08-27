@@ -8,15 +8,23 @@ Centralises the three access rules that appear across many endpoints:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core import audit
 from app.core.db import get_db
 from app.core.security import get_current_user
 from app.models.care import Appointment, Referral
 from app.models.enums import GuardianPermissionType, UserRole
-from app.models.identity import GuardianRelationship, PatientProfile, User
+from app.models.identity import (
+    BreakGlassAccess,
+    GuardianRelationship,
+    PatientProfile,
+    User,
+)
 from app.models.providers import Doctor
 
 
@@ -105,36 +113,140 @@ def resolve_patient_access(
     Patients reach their own record; guardians reach a dependent's within the
     granted scope; doctors reach patients they have a care relationship with;
     system admins reach anything.
-    """
-    role = str(current_user.role)
 
+    Every access by someone who is *not* the patient is written to the audit
+    trail. Recording only writes is the common shortcut and the wrong one:
+    the harm in a medical system is usually someone reading a record they had
+    no business opening, and a log of modifications cannot show that. HIPAA
+    §164.312(b) asks for access logging for the same reason.
+
+    Self-access is deliberately not logged. It is not a disclosure, and
+    recording it would bury the entries that matter under routine noise.
+    """
     if current_user.id == patient_user_id:
         return current_user
 
+    patient, basis = _authorise_other(db, current_user, patient_user_id, permission)
+
+    # One exit, one audit entry. The four authorisation paths used to return
+    # independently, and logging in each would have meant four chances to add
+    # a fifth later and forget.
+    #
+    # This commits, which is safe because access is resolved at the top of a
+    # handler before anything has been changed. It is deliberate rather than
+    # incidental: joining the caller's transaction would mean a read-only
+    # endpoint — which never commits — silently discarding its own access log,
+    # and an access log that disappears on the paths that only read is worse
+    # than none, because those are exactly the accesses worth recording.
+    audit.record(
+        db,
+        action="phi.read",
+        actor_user_id=current_user.id,
+        actor_role=str(current_user.role),
+        resource_type="patient",
+        resource_id=patient_user_id,
+        detail={"basis": basis, "permission": str(permission) if permission else None},
+    )
+    return patient
+
+
+def _authorise_other(
+    db: Session,
+    current_user: User,
+    patient_user_id: str,
+    permission: GuardianPermissionType | None,
+) -> tuple[User, str]:
+    """Authorise access to someone else's record. Returns (patient, basis).
+
+    `basis` names *why* access was allowed, so the audit trail answers the
+    question an investigator actually asks — not merely that a doctor read a
+    record, but under which relationship they were entitled to.
+    """
+    role = str(current_user.role)
+
     if role == str(UserRole.SYSTEM_ADMIN):
-        return _load_patient(db, patient_user_id)
+        return _load_patient(db, patient_user_id), "system_admin"
 
     if role == str(UserRole.GUARDIAN):
         relationship = get_relationship(db, current_user.id, patient_user_id)
         if permission:
             require_permission(relationship, permission)
-        return _load_patient(db, patient_user_id)
+        return _load_patient(db, patient_user_id), "guardian_consent"
 
     if role == str(UserRole.DOCTOR):
-        if not doctor_has_patient(db, current_user.id, patient_user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "You can only access patients who are booked with you or "
-                    "have been referred to you."
-                ),
-            )
-        return _load_patient(db, patient_user_id)
+        if doctor_has_patient(db, current_user.id, patient_user_id):
+            return _load_patient(db, patient_user_id), "care_relationship"
+        if _break_glass_active(db, current_user.id, patient_user_id):
+            return _load_patient(db, patient_user_id), "break_glass"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "You can only access patients who are booked with you or "
+                "have been referred to you."
+            ),
+        )
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="You do not have access to this patient record.",
     )
+
+
+BREAK_GLASS_HOURS = 4
+
+
+def _break_glass_active(db: Session, actor_user_id: str, patient_user_id: str) -> bool:
+    """Is there a live emergency override for this clinician and patient?"""
+    return db.execute(
+        select(BreakGlassAccess.id).where(
+            BreakGlassAccess.actor_user_id == actor_user_id,
+            BreakGlassAccess.patient_user_id == patient_user_id,
+            BreakGlassAccess.expires_at > datetime.now(timezone.utc),
+        )
+    ).first() is not None
+
+
+def declare_break_glass(
+    db: Session, *, actor: User, patient_user_id: str, reason: str
+) -> BreakGlassAccess:
+    """Open an emergency override, and say so in the audit trail.
+
+    Time-boxed rather than open-ended: an override that lasts until someone
+    remembers to close it lasts forever. Four hours covers a shift handover
+    and expires on its own.
+    """
+    reason = (reason or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Emergency access needs a written clinical reason. It is "
+                "recorded against your name and reviewed afterwards."
+            ),
+        )
+    if str(actor.role) not in (str(UserRole.DOCTOR), str(UserRole.SYSTEM_ADMIN)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only clinicians can use emergency access.",
+        )
+
+    grant = BreakGlassAccess(
+        actor_user_id=actor.id,
+        patient_user_id=patient_user_id,
+        reason=reason,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=BREAK_GLASS_HOURS),
+    )
+    db.add(grant)
+    audit.record(
+        db,
+        action="phi.break_glass_declared",
+        actor_user_id=actor.id,
+        actor_role=str(actor.role),
+        resource_type="patient",
+        resource_id=patient_user_id,
+        detail={"reason": reason, "expires_in_hours": BREAK_GLASS_HOURS},
+    )
+    return grant
 
 
 def _load_patient(db: Session, patient_user_id: str) -> User:
