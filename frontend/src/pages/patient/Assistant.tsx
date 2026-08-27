@@ -182,6 +182,25 @@ export default function Assistant() {
     void loadSessions();
   }, [loadSessions]);
 
+  // Continue the conversation the floating chat was in.
+  //
+  // The popup and this page each held their own session id, and the "open
+  // full assistant page" link carried nothing — so a patient who had been
+  // describing a symptom in the popup arrived here to an empty screen and
+  // had to start again. The popup now passes its session in the URL and this
+  // picks it up once, on arrival.
+  const [resumed, setResumed] = useState(false);
+  useEffect(() => {
+    if (resumed) return;
+    const wanted = new URLSearchParams(window.location.search).get("session");
+    if (!wanted) return;
+    setResumed(true);
+    void openSession(wanted);
+    // Drop it from the address bar so a refresh does not silently reopen an
+    // old conversation the patient thought they had left.
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [resumed]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, trace]);
