@@ -15,6 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import doctor_has_patient, get_doctor_for_user, get_patient_profile
+from app.core import audit
 from app.core.db import get_db
 from app.core.security import get_current_user, require_doctor
 from app.models.care import Appointment, Consultation, Medication, Referral
@@ -671,3 +672,71 @@ def my_patients(
             }
         )
     return out
+
+
+class PatientMessageRequest(BaseModel):
+    patient_user_id: str
+    body: str = Field(min_length=4, max_length=1200)
+    # Marks it as something to act on now rather than read later. It does not
+    # change urgency — that stays the rule engine's alone — it only changes
+    # how prominently the patient sees it.
+    urgent: bool = False
+
+
+@router.post("/patients/message", status_code=status.HTTP_201_CREATED)
+def message_patient(
+    payload: PatientMessageRequest,
+    current_user: User = Depends(require_doctor),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Send a patient a message they will hear read aloud.
+
+    Delivered as a `doctor_message` notification, which the patient app lifts
+    out of the list and speaks through the avatar. That is the whole reason
+    this exists: a patient who cannot comfortably read the screen still gets
+    what their doctor told them, in their own language setting.
+
+    The doctor's words are sent verbatim. Nothing rewrites, summarises or
+    expands them — the avatar's rule is that it only ever voices deterministic
+    text, and a clinician's own message is exactly that. A model improving the
+    phrasing would make the doctor accountable for words they did not write.
+    """
+    if not doctor_has_patient(db, current_user.id, payload.patient_user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have a care relationship with this patient.",
+        )
+
+    doctor_name = current_user.full_name or "Your doctor"
+    notification = Notification(
+        user_id=payload.patient_user_id,
+        category=NotificationCategory.DOCTOR_MESSAGE,
+        priority=(
+            NotificationPriority.HIGH if payload.urgent
+            else NotificationPriority.NORMAL
+        ),
+        title=f"Message from {doctor_name}",
+        body=payload.body.strip(),
+        action_type="doctor_message",
+        action_id=current_user.id,
+    )
+    db.add(notification)
+
+    audit.record(
+        db,
+        action="doctor.message_sent",
+        actor_user_id=current_user.id,
+        actor_role=str(current_user.role),
+        resource_type="patient",
+        resource_id=payload.patient_user_id,
+        detail={"urgent": payload.urgent, "length": len(payload.body)},
+        commit=False,
+    )
+    db.commit()
+    db.refresh(notification)
+    return {
+        "id": notification.id,
+        "sent_to": payload.patient_user_id,
+        "title": notification.title,
+        "spoken": True,
+    }
