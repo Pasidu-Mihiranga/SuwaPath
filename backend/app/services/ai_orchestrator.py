@@ -49,6 +49,31 @@ LANGUAGE_NAMES = {
     Language.TA: "Tamil",
 }
 
+# Sinhala and Tamil each sit in their own Unicode block, so a per-character
+# range check identifies them exactly — no model call or library needed.
+_SINHALA_RANGE = (0x0D80, 0x0DFF)
+_TAMIL_RANGE = (0x0B80, 0x0BFF)
+
+
+def detect_language(text: str) -> Language | None:
+    """Guess the script a message is written in, for per-turn replies.
+
+    Returns ``None`` when the text has no alphabetic signal either way (pure
+    digits, punctuation, emoji) — e.g. "7" answering a severity question —
+    so the caller can keep whatever language the conversation was already in
+    instead of snapping back to English.
+    """
+    has_latin_letter = False
+    for ch in text:
+        codepoint = ord(ch)
+        if _SINHALA_RANGE[0] <= codepoint <= _SINHALA_RANGE[1]:
+            return Language.SI
+        if _TAMIL_RANGE[0] <= codepoint <= _TAMIL_RANGE[1]:
+            return Language.TA
+        if ch.isascii() and ch.isalpha():
+            has_latin_letter = True
+    return Language.EN if has_latin_letter else None
+
 SAFETY_PREAMBLE = """You are SuwaPath's clinical intake assistant for Sri Lanka.
 
 Absolute rules:
