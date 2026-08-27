@@ -26,6 +26,7 @@ from app.api.v1 import (
     providers,
     symptoms,
 )
+from app.core import crypto
 from app.core.config import settings
 from app.core.db import create_all
 
@@ -64,6 +65,28 @@ def _warm_retrieval_in_background() -> None:
 async def lifespan(app: FastAPI):
     create_all()
     settings.ensure_directories()
+
+    # Fail closed on encryption, but only where it matters.
+    #
+    # Without a key, the encrypted column types write plaintext — which is the
+    # right behaviour for a demo and the wrong behaviour for a deployment
+    # holding real records. `crypto.is_enabled()` has existed since encryption
+    # was added and had no callers; this is the check it was written for.
+    #
+    # Refusing to start is the correct response rather than a warning: a
+    # warning in a startup log is exactly what nobody reads before the first
+    # patient record is written in the clear.
+    if settings.environment == "production" and not crypto.is_enabled():
+        raise RuntimeError(
+            "SUWAPATH_ENCRYPTION_KEY must be set when environment=production. "
+            "Without it, patient records are written to the database in "
+            "plaintext."
+        )
+    if not crypto.is_enabled():
+        logger.warning(
+            "No encryption key set — patient records will be stored in "
+            "plaintext. Acceptable only for synthetic data."
+        )
 
     # Retrieval warms on a background thread rather than here.
     #
