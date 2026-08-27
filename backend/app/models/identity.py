@@ -211,6 +211,46 @@ class AuditLog(Base, TimestampMixin):
     entry_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
 
+class BreakGlassAccess(Base, TimestampMixin):
+    """A clinician's emergency override of the normal care-relationship check.
+
+    An unconscious patient arriving at an emergency department has no
+    appointment with the doctor treating them, and a system that answers "you
+    have no care relationship with this person" in that moment is a system
+    people route around — by sharing logins, or by not using it. Refusing is
+    not the safe option it looks like.
+
+    So the override exists, and accountability rather than prevention is the
+    control: it requires a typed reason, it expires, and both the declaration
+    and every record read under it are written to the tamper-evident audit
+    trail. It is a door that records everyone who uses it, not a locked one.
+    """
+
+    __tablename__ = "break_glass_access"
+    __table_args__ = (
+        Index("ix_break_glass_actor_patient", "actor_user_id", "patient_user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    actor_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    patient_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    # Free text and mandatory. A dropdown of pre-written justifications is
+    # easier to click through without thinking, which is the opposite of what
+    # this field is for.
+    reason: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Set once a supervisor has looked at it. Unreviewed overrides are the
+    # report a compliance officer should be reading.
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
 class AuditChainHead(Base, TimestampMixin):
     """The tip of the audit hash chain — a single row, locked on every append.
 
