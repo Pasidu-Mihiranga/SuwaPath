@@ -347,6 +347,59 @@ def main() -> int:
         str(back_edges),
     )
 
+    section("NATIVE TOOL CALLING — the manifest never exceeds the scope")
+    # Being denied at execution is not the guarantee we want. A guardian with
+    # no medications consent must never learn that a medications tool exists,
+    # because a tool the model has never heard of cannot be talked into being
+    # called. This inspects the actual outbound request body.
+    from unittest.mock import patch
+    from app.agent.react import NativeToolCallPlanner
+    from app.services import llm as llm_module
+
+    captured: dict = {}
+
+    def _intercept(url, json=None, headers=None, **kwargs):
+        captured.clear()
+        captured.update(json or {})
+        raise RuntimeError("intercepted before network")
+
+    scopes = {
+        "patient": ({"subject_user_id": "u1", "role": "patient", "permissions": "self"},
+                    {"medications", "records"}),
+        "guardian/appointments": ({"subject_user_id": "u2", "role": "guardian",
+                                   "permissions": ["appointments"]}, set()),
+        "guardian/medications": ({"subject_user_id": "u3", "role": "guardian",
+                                  "permissions": ["medications"]}, {"medications"}),
+        "guardian/full_medical": ({"subject_user_id": "u4", "role": "guardian",
+                                   "permissions": ["full_medical"]},
+                                  {"medications", "records"}),
+    }
+    context = {"user_text": "what medications is she on?", "consult": {}}
+
+    for label, (scope, expected_sensitive) in scopes.items():
+        # Cooldowns persist across calls, so a previous interception would
+        # otherwise leave every provider skipped and the manifest empty —
+        # which looks like a pass while testing nothing at all.
+        llm_module._health._until.clear()
+        allowed = react.allowed_tools(scope)
+        captured.clear()
+        with patch("app.services.llm._http.post", side_effect=_intercept):
+            NativeToolCallPlanner(allowed).plan(context, react.Scratchpad())
+
+        offered = {t["function"]["name"] for t in captured.get("tools", [])}
+        check(
+            f"manifest sent to the model equals the allowed set ({label})",
+            offered == set(allowed),
+            f"offered={sorted(offered)} allowed={sorted(allowed)}",
+        )
+        check(
+            f"no out-of-scope sensitive tool is offered ({label})",
+            offered & {"medications", "records"} == expected_sensitive,
+            f"offered={sorted(offered & {'medications', 'records'})}",
+        )
+
+    llm_module._health._until.clear()
+
     print("\n" + "=" * 74)
     print("RESULTS")
     print("=" * 74)
