@@ -1,5 +1,5 @@
 {
-  "model_version": "resnet50-photo",
+  "model_version": "resnet50-clean",
   "source_checkpoint": "pneumonia_resnet50_combined_noPhone.pth",
   "class_order": [
     "normal",
@@ -12,7 +12,7 @@
     "tta": false
   },
   "training": {
-    "dataset": "combined dataset, phone photographs EXCLUDED from training",
+    "dataset": "combined dataset, phone photographs EXCLUDED from training (confirmed)",
     "trained_at": null
   },
   "test_metrics": {

@@ -27,6 +27,11 @@ backend/storage/qdrant/
 .env.*
 !.env.example
 
+# Training checkpoints. The image serves ONNX; the .pth files are ~283 MB of
+# build context that nothing in the runtime can load.
+models/**/*.pth
+.venv-convert/
+
 # Docs and scratch.
 *.md
 !models/**/*.md
