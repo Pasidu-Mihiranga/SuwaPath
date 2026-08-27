@@ -406,4 +406,15 @@ CORPUS: list[KnowledgeDoc] = [
     ),
 ]
 
+# Sri Lanka's own disease burden and health system, kept in a separate module
+# because it is maintained against different sources — Ministry of Health and
+# Epidemiology Unit campaigns rather than general WHO patient education — and
+# because it is the half most likely to need seasonal updating.
+#
+# Imported at the bottom so `corpus_lk` can import KnowledgeDoc from here
+# without a circular import.
+from app.knowledge.corpus_lk import CORPUS_LK  # noqa: E402
+
+CORPUS = [*CORPUS, *CORPUS_LK]
+
 CORPUS_BY_ID = {doc.id: doc for doc in CORPUS}
