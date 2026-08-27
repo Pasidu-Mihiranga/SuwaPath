@@ -52,14 +52,14 @@ class Settings(BaseSettings):
     # Groq is first because on free tiers it is by far the fastest (sub-second
     # for llama-3.1-8b-instant), which matters for a conversational product.
     groq_api_key: str | None = None
-    groq_model: str = "llama-3.3-70b-versatile"
-    groq_fast_model: str = "llama-3.1-8b-instant"
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_fast_model: str = "groq/compound-mini"
 
     open_router_api_key: str | None = None
     open_router_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-flash-latest"
 
     tavily_api_key: str | None = None
 

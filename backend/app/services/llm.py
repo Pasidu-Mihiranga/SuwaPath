@@ -198,6 +198,11 @@ def _call_gemini(messages, temperature, max_tokens, as_json, fast) -> tuple[str,
     config: dict[str, Any] = {
         "temperature": temperature,
         "maxOutputTokens": max_tokens,
+        # Gemini 3's "thinking" models spend maxOutputTokens on an invisible
+        # scratchpad before writing the reply, which starves short budgets
+        # (e.g. the 90-token fast "ask" calls) into an empty candidate. None
+        # of our prompts need multi-step reasoning, so thinking buys nothing.
+        "thinkingConfig": {"thinkingBudget": 0},
     }
     if as_json:
         config["responseMimeType"] = "application/json"
