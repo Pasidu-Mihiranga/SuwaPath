@@ -60,7 +60,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agent import tools as tools_module
 from app.agent.tools import ROUTE_TOOLS, TOOLS, ToolDenied
+from app.core.config import settings
 from app.services import llm
 
 logger = logging.getLogger(__name__)
@@ -161,6 +163,23 @@ with slightly different wording is never useful — if a tool already returned \
 results, use a different tool or finish."""
 
 
+# The native-tool-calling variant. Shorter than PLANNER_SYSTEM because the
+# tool list, argument names and permitted values are carried by the schemas
+# themselves rather than described in prose.
+PLANNER_SYSTEM_NATIVE = """You are planning which internal lookup to run next \
+for a healthcare navigation assistant.
+
+You see the patient's question, what the assistant has concluded so far, and a \
+log of lookups already performed with their outcomes. You do NOT see the \
+contents of those lookups — only whether they returned anything. That is \
+deliberate.
+
+Call one tool if a lookup would genuinely add something. Reply with plain text \
+and no tool call when nothing further is needed — that is the normal way to \
+finish, and finishing early is better than a speculative lookup. Never repeat \
+a lookup that already returned results."""
+
+
 class DeterministicPlanner:
     """The previous behaviour, expressed as a plan.
 
@@ -255,6 +274,99 @@ class LlmPlanner:
         }
 
 
+class NativeToolCallPlanner:
+    """Chooses the next tool using the provider's own function-calling API.
+
+    Same contract as every other planner: one decision per call, returning
+    `call_tool` or `finish`. It emphatically does *not* run its own
+    request/response loop — `run_loop` already bounds steps, tool calls and
+    wall-clock time, and a second loop nested inside would quietly escape all
+    three.
+
+    `LlmPlanner` exists because `llm.py` had no native tool calling and the
+    protocol had to be hand-rolled as JSON. Both are kept while this one is
+    proven on the free tier: it is selected by a setting, returns None on
+    anything it cannot use, and `run_loop` then falls through to the JSON
+    planner and finally to the deterministic one. Fewer moving parts would be
+    better, and retiring `LlmPlanner` is the intended end state — but not
+    before there is evidence that a free-tier model calls tools reliably.
+    """
+
+    name = "native"
+
+    def __init__(self, allowed: list[str]) -> None:
+        self.allowed = allowed
+
+    def plan(self, context: dict, pad: Scratchpad) -> dict | None:
+        consult = context.get("consult") or {}
+        prompt = {
+            "question": context.get("user_text", "")[:400],
+            "assistant_conclusion": consult.get("summary", "")[:300],
+            "specialty_identified": consult.get("specialty"),
+            "lookups_so_far": pad.planner_view(),
+        }
+
+        # Withdraw tools that have already run. Offered the full list and told
+        # in prose not to repeat itself, the model asked for `find_care` and
+        # `directory` a second time with identical arguments and spent half
+        # the step budget being refused — `tool_choice: "auto"` pushes towards
+        # calling something rather than stopping. Removing a spent tool from
+        # the manifest makes the repeat unaskable instead of merely
+        # discouraged, which is how scope is handled two lines below and for
+        # the same reason.
+        spent = {o.tool for o in pad.observations if o.status == "ok"}
+        offerable = [name for name in self.allowed if name not in spent]
+        if not offerable:
+            return {"thought": "Every available lookup has been run.", "action": "finish"}
+
+        completion = llm.complete(
+            json.dumps(prompt),
+            system=PLANNER_SYSTEM_NATIVE,
+            # Only the tools this caller is entitled to are ever described.
+            # Filtering at execution alone would still teach the model that a
+            # medications tool exists for a guardian with no medications
+            # consent, and the point of `allowed_tools` is that it does not.
+            tools=tools_module.schemas_for(offerable),
+            temperature=0.0,
+            max_tokens=500,
+            fast=True,
+        )
+
+        if not completion.ok:
+            return None
+        if not completion.tool_calls:
+            # No tool chosen is a considered "nothing further to look up".
+            return {"thought": completion.text[:200], "action": "finish"}
+
+        call = completion.tool_calls[0]
+        function = call.get("function") or {}
+        tool = str(function.get("name", "")).strip()
+        # Checked against what was actually offered, not the wider allowed
+        # set: a model that names a withdrawn or unoffered tool has gone off
+        # script, and handing the step to the next planner is safer than
+        # honouring it.
+        if tool not in offerable:
+            return None
+
+        # Arguments arrive as a JSON *string*. Malformed JSON is a normal
+        # free-tier outcome, not an exception path — returning None hands the
+        # step to the next planner instead of losing the turn.
+        try:
+            args = json.loads(function.get("arguments") or "{}")
+        except (TypeError, ValueError):
+            logger.warning("native planner sent unparseable arguments for %s", tool)
+            return None
+        if not isinstance(args, dict):
+            return None
+
+        return {
+            "thought": completion.text[:200],
+            "action": "call_tool",
+            "tool": tool,
+            "args": args,
+        }
+
+
 def allowed_tools(scope: dict) -> list[str]:
     """Tools this caller may use, filtered before the planner sees them.
 
@@ -291,7 +403,14 @@ def run_loop(
     started = time.monotonic()
 
     allowed = allowed_tools(scope)
-    llm_planner = LlmPlanner(allowed)
+    # Ordered strongest to weakest. Each returns None when it cannot produce a
+    # usable decision, so the chain degrades: native tool calling, then the
+    # hand-rolled JSON protocol, then the fixed handoffs that need no model at
+    # all. The last of those is why a keyless deployment still works.
+    chain = []
+    if settings.native_tool_calling_enabled:
+        chain.append(NativeToolCallPlanner(allowed))
+    chain.append(LlmPlanner(allowed))
     fallback = DeterministicPlanner()
 
     for step in range(1, MAX_STEPS + 1):
@@ -304,20 +423,28 @@ def run_loop(
             break
 
         decision = None
+        chose = ""
         if planner is not None:
             decision = planner.plan(context, pad)
+            chose = getattr(planner, "name", "injected")
         else:
-            decision = llm_planner.plan(context, pad)
+            for candidate in chain:
+                decision = candidate.plan(context, pad)
+                if decision is not None:
+                    chose = candidate.name
+                    break
             if decision is None:
                 # No provider, or an unusable reply. Fall back rather than
                 # abandoning the turn — this is the zero-key path.
                 decision = fallback.plan(context, pad)
+                chose = fallback.name
 
         if not decision or decision.get("action") == "finish":
             trace.append({
                 "node": "react",
                 "step": step,
                 "stop": "finished",
+                "planner": chose,
                 "thought": (decision or {}).get("thought", ""),
             })
             break
@@ -371,6 +498,7 @@ def run_loop(
             "step": step,
             "tool": tool,
             "status": status,
+            "planner": chose,
             "thought": decision.get("thought", ""),
             "ms": int((time.perf_counter() - step_started) * 1000),
         })

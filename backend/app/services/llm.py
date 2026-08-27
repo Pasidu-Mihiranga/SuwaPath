@@ -55,6 +55,11 @@ class Completion:
     latency_ms: int
     ok: bool = True
     attempts: list[dict[str, Any]] = field(default_factory=list)
+    # Populated only when the caller passed `tools` and the model chose to
+    # call one. A tool-calling reply legitimately has empty `text`, so callers
+    # that pass tools must check this rather than the truthiness of the
+    # Completion.
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return self.ok and bool(self.text.strip())
@@ -108,8 +113,10 @@ def _openai_style(
     temperature: float,
     max_tokens: int,
     as_json: bool,
+    tools: list[dict] | None = None,
+    tool_choice: str | None = None,
     extra_headers: dict[str, str] | None = None,
-) -> str:
+) -> tuple[str, list[dict]]:
     """Groq and OpenRouter both speak the OpenAI chat-completions dialect."""
     payload: dict[str, Any] = {
         "model": model,
@@ -117,6 +124,9 @@ def _openai_style(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = tool_choice or "auto"
     if as_json:
         payload["response_format"] = {"type": "json_object"}
         # Groq rejects json_object mode unless the word "json" appears in the
@@ -138,18 +148,26 @@ def _openai_style(
     if not choices:
         raise RuntimeError(f"no choices in response: {str(data)[:200]}")
     message = choices[0].get("message") or {}
+    tool_calls = message.get("tool_calls") or []
     # Reasoning models put the user-visible answer in `content` and their
     # scratchpad in `reasoning`. An empty `content` means the model spent its
-    # whole budget thinking, which is a failure for our purposes.
+    # whole budget thinking, which is a failure for our purposes — unless it
+    # chose to call a tool, where empty content is the normal, correct shape.
     text = (message.get("content") or "").strip()
-    if not text:
+    if not text and not tool_calls:
         raise RuntimeError("empty content (model returned only reasoning)")
-    return text
+    return text, tool_calls
 
 
-def _call_groq(messages, temperature, max_tokens, as_json, fast) -> tuple[str, str]:
-    model = settings.groq_fast_model if fast else settings.groq_model
-    return model, _openai_style(
+def _call_groq(
+    messages, temperature, max_tokens, as_json, fast, tools=None, tool_choice=None
+) -> tuple[str, str, list[dict]]:
+    # `fast` is ignored for tool calls. Groq's small model is one of its
+    # agentic "compound" models, which reject `tools` outright with a 400 —
+    # so asking for speed on a tool call means getting no answer at all.
+    # Correctness over latency: fall back to the full model.
+    model = settings.groq_fast_model if (fast and not tools) else settings.groq_model
+    text, tool_calls = _openai_style(
         url="https://api.groq.com/openai/v1/chat/completions",
         api_key=settings.groq_api_key or "",
         model=model,
@@ -157,12 +175,17 @@ def _call_groq(messages, temperature, max_tokens, as_json, fast) -> tuple[str, s
         temperature=temperature,
         max_tokens=max_tokens,
         as_json=as_json,
+        tools=tools,
+        tool_choice=tool_choice,
     )
+    return model, text, tool_calls
 
 
-def _call_open_router(messages, temperature, max_tokens, as_json, fast) -> tuple[str, str]:
+def _call_open_router(
+    messages, temperature, max_tokens, as_json, fast, tools=None, tool_choice=None
+) -> tuple[str, str, list[dict]]:
     model = settings.open_router_model
-    return model, _openai_style(
+    text, tool_calls = _openai_style(
         url="https://openrouter.ai/api/v1/chat/completions",
         api_key=settings.open_router_api_key or "",
         model=model,
@@ -170,15 +193,20 @@ def _call_open_router(messages, temperature, max_tokens, as_json, fast) -> tuple
         temperature=temperature,
         max_tokens=max_tokens,
         as_json=as_json,
+        tools=tools,
+        tool_choice=tool_choice,
         # OpenRouter attributes free-tier usage to a referring app.
         extra_headers={
             "HTTP-Referer": "https://suwapath.lk",
             "X-Title": "SuwaPath",
         },
     )
+    return model, text, tool_calls
 
 
-def _call_gemini(messages, temperature, max_tokens, as_json, fast) -> tuple[str, str]:
+def _call_gemini(
+    messages, temperature, max_tokens, as_json, fast, tools=None, tool_choice=None
+) -> tuple[str, str, list[dict]]:
     model = settings.gemini_model
     # Gemini has no system role: the system message is prepended to the first
     # user turn, which is what the official cookbook recommends.
@@ -221,13 +249,21 @@ def _call_gemini(messages, temperature, max_tokens, as_json, fast) -> tuple[str,
     text = "".join(part.get("text", "") for part in parts).strip()
     if not text:
         raise RuntimeError("empty candidate text")
-    return model, text
+    return model, text, []
 
 
-_PROVIDERS: tuple[tuple[str, Any, str], ...] = (
-    ("groq", _call_groq, "groq_enabled"),
-    ("openrouter", _call_open_router, "open_router_enabled"),
-    ("gemini", _call_gemini, "gemini_enabled"),
+# The fourth field is whether the provider speaks OpenAI-style tool calling.
+# Gemini does support function calling, but through a different contract —
+# `functionDeclarations` with object-valued arguments, rather than `tools`
+# with a JSON string. Translating between the two would mean maintaining a
+# second schema dialect for the least reliable of the three free tiers, so a
+# tool-calling request simply skips it. Nothing is lost: when no tool-capable
+# provider answers, the caller falls back to the deterministic planner, which
+# is the same path a keyless deployment already takes.
+_PROVIDERS: tuple[tuple[str, Any, str, bool], ...] = (
+    ("groq", _call_groq, "groq_enabled", True),
+    ("openrouter", _call_open_router, "open_router_enabled", True),
+    ("gemini", _call_gemini, "gemini_enabled", False),
 )
 
 
@@ -242,11 +278,18 @@ def complete(
     max_tokens: int = 900,
     as_json: bool = False,
     fast: bool = False,
+    tools: list[dict] | None = None,
+    tool_choice: str | None = None,
 ) -> Completion:
     """Ask the first healthy provider. Never raises.
 
     ``fast=True`` asks for the small model where a provider has one — used for
     routing and classification, where latency matters more than nuance.
+
+    ``tools`` offers OpenAI-style function definitions. Providers that do not
+    speak that dialect are skipped rather than translated to; see
+    ``_PROVIDERS``. The reply's chosen calls arrive on ``Completion.tool_calls``,
+    and may come with empty ``text``.
     """
     if isinstance(messages, str):
         messages = [{"role": "user", "content": messages}]
@@ -256,8 +299,11 @@ def complete(
     started = time.perf_counter()
     attempts: list[dict[str, Any]] = []
 
-    for name, call, flag in _PROVIDERS:
+    for name, call, flag, supports_tools in _PROVIDERS:
         if not getattr(settings, flag):
+            continue
+        if tools and not supports_tools:
+            attempts.append({"provider": name, "status": "no_tool_support"})
             continue
         if not _health.available(name):
             attempts.append({"provider": name, "status": "cooling_down"})
@@ -265,7 +311,9 @@ def complete(
 
         attempt_started = time.perf_counter()
         try:
-            model, text = call(messages, temperature, max_tokens, as_json, fast)
+            model, text, tool_calls = call(
+                messages, temperature, max_tokens, as_json, fast, tools, tool_choice
+            )
         except Exception as exc:  # noqa: BLE001
             # A 400 means *we* sent something the provider disliked. Cooling
             # the provider down would punish it for our bug and push every
@@ -296,6 +344,7 @@ def complete(
             model=model,
             latency_ms=int((time.perf_counter() - started) * 1000),
             attempts=attempts,
+            tool_calls=tool_calls or [],
         )
 
     return Completion(
@@ -377,7 +426,7 @@ def available() -> bool:
     """True when at least one provider is configured and not cooling down."""
     return any(
         getattr(settings, flag) and _health.available(name)
-        for name, _, flag in _PROVIDERS
+        for name, _, flag, _supports in _PROVIDERS
     )
 
 
@@ -395,9 +444,9 @@ def status() -> dict:
                     "gemini": settings.gemini_model,
                 }[name],
             }
-            for name, _, flag in _PROVIDERS
+            for name, _, flag, _supports in _PROVIDERS
         ],
-        "order": [name for name, _, _ in _PROVIDERS],
+        "order": [name for name, _, _, _ in _PROVIDERS],
         "cooling_down": _health.snapshot(),
         "any_available": available(),
     }

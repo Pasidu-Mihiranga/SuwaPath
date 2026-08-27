@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # for llama-3.1-8b-instant), which matters for a conversational product.
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-120b"
+    # An agentic "compound" model, chosen because it is the only small Groq
+    # model that reliably honours JSON mode — gpt-oss-20b failed it on every
+    # attempt, and qwen returns its reasoning inside the content. Two
+    # consequences worth knowing before changing it: it rejects tool calling
+    # outright (see llm._call_groq), and because it runs on llama-3.3-70b
+    # underneath, its rate-limit errors name *that* model, which is otherwise
+    # baffling since nothing here configures it.
     groq_fast_model: str = "groq/compound-mini"
 
     open_router_api_key: str | None = None
@@ -60,6 +67,13 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-flash-latest"
+
+    # Let the ReAct planner pick tools through the provider's own
+    # function-calling API instead of the hand-rolled JSON protocol. Off by
+    # default until there is evidence a free-tier model does it reliably;
+    # when it fails the planner chain falls back to the JSON protocol and
+    # then to fixed handoffs, so enabling it cannot break the turn.
+    native_tool_calling_enabled: bool = False
 
     tavily_api_key: str | None = None
 
