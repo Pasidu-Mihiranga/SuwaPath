@@ -13,7 +13,9 @@ import {
   relativeDay,
 } from "../../components/ui";
 import { ProposalInbox } from "../../components/Proposals";
+import DoctorAvatar from "../../components/Avatar/DoctorAvatar";
 import { api, errorMessage } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
 
 /* --------------------------------------------------------- Appointments */
 
@@ -375,6 +377,8 @@ const CATEGORY_ICON: Record<string, IconName> = {
 };
 
 export function Notifications() {
+  const { user } = useAuth();
+  const language = user?.preferred_language ?? "en";
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -409,6 +413,33 @@ export function Notifications() {
           </button>
         )}
       </header>
+
+      {/* A message from the care team is the one notification a patient may
+          genuinely be unable to read for themselves, and the one where being
+          missed matters most. It is lifted out of the list and offered aloud
+          rather than sitting as the fourth row of a scrollable log.
+
+          The avatar reads the doctor's own words. Nothing is generated. */}
+      {(() => {
+        const fromDoctor = (data.notifications ?? []).find(
+          (n: any) => n.category === "doctor_message" && !n.is_read,
+        );
+        if (!fromDoctor) return null;
+        const body = [fromDoctor.title, fromDoctor.body].filter(Boolean).join(". ");
+        return (
+          <DoctorAvatar
+            variant="doctor"
+            message={body}
+            // The notification payload carries no sender name, so the
+            // component's neutral heading stands rather than inventing one.
+            language={language}
+            onDismiss={async () => {
+              await api.post(`/notifications/${fromDoctor.id}/read`);
+              await load();
+            }}
+          />
+        );
+      })()}
 
       {/* Anything the system prepared on its own sits above the log of things
           that already happened — it is the only part of this page that still
