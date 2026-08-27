@@ -1,0 +1,22 @@
+{
+  "model_version": "resnet50-general",
+  "source_checkpoint": "pneumonia_resnet50_best.pth",
+  "class_order": [
+    "normal",
+    "pneumonia"
+  ],
+  "operating_point": {
+    "threshold": null,
+    "policy": "TODO: choose the threshold meeting your recall target",
+    "min_recall_target": 0.95,
+    "tta": false
+  },
+  "training": {
+    "dataset": "combined adult+paediatric chest X-ray",
+    "trained_at": null
+  },
+  "test_metrics": {
+    "TODO": "sensitivity, specificity, AUC on a held-out set"
+  },
+  "converted_at": "2026-08-27T18:38:32.008148+00:00"
+}
