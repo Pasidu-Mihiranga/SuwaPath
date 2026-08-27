@@ -64,6 +64,10 @@ COPY --from=deps --chown=app:app /opt/venv /opt/venv
 
 WORKDIR /home/app/backend
 COPY --chown=app:app backend/app ./app
+# Operational scripts: schema migrations and model calibration. They run
+# through `docker compose run --rm backend python scripts/<name>.py`, which
+# is the only way to reach the database on a host nobody has shell access to.
+COPY --chown=app:app backend/scripts ./scripts
 COPY --chown=app:app models /home/app/models
 
 # Pre-download the embedding model into the image.
