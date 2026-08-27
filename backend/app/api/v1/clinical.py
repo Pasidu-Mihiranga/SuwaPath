@@ -504,9 +504,41 @@ def update_consultation(
     if consultation.doctor_id != doctor.id:
         raise HTTPException(status_code=403, detail="Not your consultation.")
 
+    # Record what changed, not that something did.
+    #
+    # A clinical record that can be edited without trace is the thing an
+    # investigation cannot work with. The audit log is hash-chained, so once
+    # a change lands here it cannot be quietly removed or altered later
+    # without breaking verification from that entry onward.
+    #
+    # The previous value is kept alongside the new one. "Diagnosis changed" is
+    # nearly useless six months later; "changed from X to Y, by this doctor,
+    # at this time" is the record that answers the question actually being
+    # asked. These are clinical fields, not identifiers.
+    changes: dict[str, dict] = {}
     for field, value in payload.model_dump(exclude_unset=True).items():
-        if value is not None:
-            setattr(consultation, field, value)
+        if value is None:
+            continue
+        previous = getattr(consultation, field, None)
+        if previous != value:
+            changes[field] = {"from": previous, "to": value}
+        setattr(consultation, field, value)
+
+    if changes:
+        audit.record(
+            db,
+            action="consultation.amended",
+            actor_user_id=current_user.id,
+            actor_role=str(current_user.role),
+            resource_type="consultation",
+            resource_id=consultation.id,
+            detail={
+                "patient_user_id": consultation.patient_user_id,
+                "fields": sorted(changes),
+                "changes": changes,
+            },
+            commit=False,
+        )
 
     db.commit()
     db.refresh(consultation)
@@ -541,6 +573,29 @@ def complete_consultation(
             appointment.completed_at = now
 
     doctor.total_consultations += 1
+
+    # Completion is the moment the record is sealed. Anything amended after
+    # this is an amendment to a finished clinical note, which is exactly the
+    # sequence a reviewer needs to be able to reconstruct — so the seal itself
+    # goes in the chain, and the `consultation.amended` entries that follow it
+    # are unambiguously post-hoc.
+    audit.record(
+        db,
+        action="consultation.completed",
+        actor_user_id=current_user.id,
+        actor_role=str(current_user.role),
+        resource_type="consultation",
+        resource_id=consultation.id,
+        detail={
+            "patient_user_id": consultation.patient_user_id,
+            "has_diagnosis": bool(consultation.diagnosis_text),
+            "has_treatment_plan": bool(consultation.treatment_plan),
+            "prescribed_count": len(consultation.prescribed_medications or []),
+            "follow_up_required": bool(consultation.follow_up_required),
+            "duration_minutes": consultation.duration_minutes,
+        },
+        commit=False,
+    )
 
     if consultation.follow_up_required and consultation.follow_up_date:
         db.add(
