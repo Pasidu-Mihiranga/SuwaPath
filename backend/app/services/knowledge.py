@@ -441,7 +441,9 @@ class KnowledgeService:
         ]
         if not results:
             return "", []
-        blocks = [f"[{r.doc.id}] {r.doc.title}\n{r.doc.text}" for r in results]
+        # Titles only — the internal document id must never reach a patient.
+        # Citations are returned alongside for the UI to render properly.
+        blocks = [f"{r.doc.title}\n{r.doc.text}" for r in results]
         return "\n\n".join(blocks), [r.to_citation() for r in results]
 
     def search_providers(

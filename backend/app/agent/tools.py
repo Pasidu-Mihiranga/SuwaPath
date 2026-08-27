@@ -362,7 +362,13 @@ def tool_directory(db: Session, scope: dict, *, question: str = "", **_: Any) ->
         for r in results
         if r.doc.payload
     ]
-    text = "\n\n".join(f"[{r.doc.id}] {r.doc.title}\n{r.doc.text}" for r in results)
+    # No document id in the text. It was there as a citation marker for the
+    # model, but nothing ever instructed the model to use it and nothing
+    # parsed it back out — so its only observable effect was patients being
+    # shown "[pd-hos-e36d1253-9ed3-41a1-a3bd-095572974b76] Maharagama Wellness
+    # Hospital" whenever this text reached them unrewritten. Citations travel
+    # separately in the structured payload, which is where the UI reads them.
+    text = "\n\n".join(f"{r.doc.title}\n{r.doc.text}" for r in results)
     return text, {
         "providers": providers,
         "citations": [r.to_citation() for r in results],

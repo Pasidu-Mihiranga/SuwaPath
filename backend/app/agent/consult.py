@@ -825,6 +825,51 @@ def _escalation_markdown(
     return "\n".join(lines)
 
 
+_TRIVIAL_WORDS = {
+    "a", "an", "the", "your", "with", "at", "to", "for", "and", "or", "of",
+    "you", "if", "is", "are", "be", "can", "will", "please", "recommended",
+}
+
+
+def _already_said(candidate: str, lines: list[str]) -> bool:
+    """Has this line's substance already appeared above it?
+
+    Compared on content words rather than exact strings: the navigation engine
+    phrases the same advice several ways ("Book a consultation with a
+    Neurology specialist" / "Book a consultation with the recommended
+    specialty at your convenience"), so exact matching would catch none of it.
+    """
+    def content_words(text: str) -> list[str]:
+        words = re.findall(r"[a-z]+", text.lower())
+        return [w for w in words if w not in _TRIVIAL_WORDS and len(w) > 2]
+
+    words = content_words(candidate)
+    if not words:
+        return False
+
+    for line in lines:
+        existing = content_words(line)
+        if not existing:
+            continue
+
+        # Measured against the shorter of the two. Dividing by the candidate's
+        # own length let a long sentence hide a repeat inside it: "Book a
+        # consultation with the recommended specialty at your convenience.
+        # Seek care sooner..." shares only "book" and "consultation" with the
+        # line above it, which is 20% of itself and 50% of the other.
+        shared = len(set(words) & set(existing))
+        if shared / min(len(set(words)), len(set(existing))) >= 0.7:
+            return True
+
+        # Advice sentences that open the same way are the same advice, however
+        # they finish. This is what actually catches the "Book a consultation"
+        # pair, which no amount of set overlap was going to.
+        if words[:2] == existing[:2] and len(words) >= 2:
+            return True
+
+    return False
+
+
 def _assessment_markdown(
     state: ConsultState,
     red_flags: rfe.RedFlagResult,
@@ -839,13 +884,17 @@ def _assessment_markdown(
     if len(heard) > 200:
         heard = heard[:200].rsplit(" ", 1)[0] + "…"
 
+    # Quoted verbatim rather than lower-cased into the sentence. Folding the
+    # patient's own words into our grammar produced "You've told me about
+    # i've had a headache for three days", which reads as broken text written
+    # by something that is not paying attention.
     lines = [
         "**What I'm hearing**",
-        f"You've told me about {heard.lower().rstrip('.')}. "
+        f"You described: “{heard.rstrip('.')}.” "
         + (
-            "Based on the patterns in what you've said, here's where I'd point you."
+            "Here is where I would point you."
             if red_flags.triggered_rules
-            else "Nothing you've described matches an emergency pattern, which is "
+            else "Nothing in that matches an emergency pattern, which is "
                  "reassuring as far as it goes."
         ),
         "",
@@ -874,17 +923,23 @@ def _assessment_markdown(
             "from text"
         )
 
+    # The navigation engine produces three overlapping sentences — an urgency
+    # line, a "next action" and a "patient guidance" — which were previously
+    # all printed. The patient read "Book a consultation with a Neurology
+    # specialist" immediately followed by "Book a consultation with the
+    # recommended specialty at your convenience". Near-duplicates are dropped
+    # rather than reworded, because the fix for saying something twice is to
+    # say it once.
     lines += [
         "",
         "**What I'd do**",
         urgency_line,
         f"- See **{recommendation.specialty_name}** — {recommendation.reason}",
         f"- Timing: {timing}",
-        f"- {recommendation.suggested_next_action}",
     ]
-
-    if recommendation.patient_guidance:
-        lines.append(f"- {recommendation.patient_guidance}")
+    for extra in (recommendation.suggested_next_action, recommendation.patient_guidance):
+        if extra and not _already_said(extra, lines):
+            lines.append(f"- {extra}")
 
     lines += [
         "",
