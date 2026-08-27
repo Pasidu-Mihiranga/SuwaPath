@@ -14,12 +14,12 @@ ever entering the prompt.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.clinical.catalog import SPECIALTY_BY_CODE
+from app.clinical.catalog import CONCEPT_SPECIALTY_WEIGHTS, SPECIALTY_BY_CODE
 from app.models.care import Appointment, CareEnrollment, Medication
 from app.models.clinical import (
     ExtractedReport,
@@ -440,6 +440,93 @@ TOOLS = {
     "web_search": tool_web_search,
     "directory": tool_directory,
 }
+
+# --------------------------------------------------------------------------
+# JSON-schema manifest, for providers that speak native tool calling
+# --------------------------------------------------------------------------
+# Hand-written rather than reflected from the functions above, which all take
+# `**_: Any` and carry no argument annotations — generated schemas would be
+# empty or wrong without saying so.
+#
+# `specialty_code` enumerates its values deliberately. Offered a free-text
+# string, the model answered a cardiology question with `{"specialty_code":
+# "CARDIO"}`, which matches nothing in the catalogue and returns silently
+# empty. The enum makes an invalid code impossible to express rather than
+# something to validate after the fact.
+#
+# Descriptions are shared with `react.py`'s TOOL_PURPOSE so the two planners
+# describe the same tools identically.
+_SPECIALTY_CODES = sorted(
+    {code for weights in CONCEPT_SPECIALTY_WEIGHTS.values() for code, _ in weights}
+)
+
+
+def _schema(name: str, description: str, properties: dict | None = None) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties or {},
+            },
+        },
+    }
+
+
+TOOL_SCHEMAS: dict[str, dict] = {
+    "find_care": _schema(
+        "find_care",
+        "Find doctors who treat a given specialty, with availability and fees.",
+        {
+            "specialty_code": {"type": "string", "enum": _SPECIALTY_CODES},
+            "capabilities": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Facility capabilities required, e.g. ecg, ct_scan.",
+            },
+        },
+    ),
+    "directory": _schema(
+        "directory",
+        "Find facilities that can perform a named test or procedure.",
+        {"question": {"type": "string", "description": "The test or procedure."}},
+    ),
+    "appointments": _schema(
+        "appointments", "Read this patient's upcoming and past appointments."
+    ),
+    "records": _schema(
+        "records", "Read this patient's uploaded reports and extracted values."
+    ),
+    "medications": _schema(
+        "medications", "Read this patient's current medications and adherence."
+    ),
+    "recommendation": _schema(
+        "recommendation", "Read the care recommendation already produced."
+    ),
+    "knowledge": _schema(
+        "knowledge",
+        "Search curated clinical guidance. Background only, never patient data.",
+        {"question": {"type": "string"}},
+    ),
+    "web_search": _schema(
+        "web_search",
+        "Search reputable public sources for current information.",
+        {"question": {"type": "string"}},
+    ),
+}
+
+
+def schemas_for(names: Iterable[str]) -> list[dict]:
+    """Schemas for exactly these tools, in a stable order.
+
+    Callers must pass an already scope-filtered list. A tool the caller has no
+    right to use must never appear in the manifest at all — being denied at
+    execution is a weaker guarantee than never learning the tool exists.
+    """
+    return [TOOL_SCHEMAS[name] for name in names if name in TOOL_SCHEMAS]
+
 
 # Which tools each route is allowed to call.
 #
