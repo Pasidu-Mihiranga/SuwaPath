@@ -449,7 +449,7 @@ export default function ChatFab() {
               </span>
             )}
             <Link
-              to="/patient/assistant"
+              to={sessionId ? `/patient/assistant?session=${sessionId}` : "/patient/assistant"}
               title="Open full assistant page"
               className="grid h-8 w-8 place-items-center rounded-full text-white/80 transition hover:bg-white/20 hover:text-white"
               onClick={() => setOpen(false)}
@@ -652,7 +652,7 @@ export default function ChatFab() {
           {/* Footer link */}
           <div className="border-t border-line bg-surface px-3 py-1.5 text-center shrink-0">
             <Link
-              to="/patient/assistant"
+              to={sessionId ? `/patient/assistant?session=${sessionId}` : "/patient/assistant"}
               onClick={() => setOpen(false)}
               className="text-xs font-medium text-brand-600 hover:underline inline-flex items-center gap-1"
             >
