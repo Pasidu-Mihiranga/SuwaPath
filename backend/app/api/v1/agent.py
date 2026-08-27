@@ -29,7 +29,7 @@ from app.models.chat import ChatSession
 from app.models.identity import AuditLog, User
 from app.privacy.boundary import egress_policy_note
 from app.core import crypto
-from app.services import chat_store, memory
+from app.services import chat_store, handoff, memory
 from app.services.ai_orchestrator import detect_language, orchestrator_status
 
 logger = logging.getLogger(__name__)
@@ -340,6 +340,35 @@ def _persist(db: Session, session: ChatSession, state: dict, response: dict) -> 
         session_id=session.id,
         confidential=session.is_private,
     )
+    # Hand a concluded consultation to the doctor.
+    #
+    # Only on assess or escalate: publishing mid-conversation would put a
+    # half-taken history in front of a clinician, which is worse than nothing
+    # because it looks complete. Private sessions never publish — they do not
+    # join back to the patient record, and that rule predates this.
+    consult_state = response.get("consult") or {}
+    if not session.is_private and consult_state.get("mode") in ("assess", "escalate"):
+        try:
+            handoff.publish_consultation(
+                db,
+                chat_session_id=session.id,
+                patient_user_id=state["scope"]["subject_user_id"],
+                language=state.get("language") or "en",
+                messages=[
+                    *state.get("history", []),
+                    {"role": "user", "content": state["user_text"]},
+                    {"role": "assistant", "content": response["answer"]},
+                ],
+                consult=consult_state,
+                red_flags=consult_state.get("red_flags") or {},
+                patient_context=state.get("safe_context") or {},
+            )
+        except Exception:  # noqa: BLE001
+            # A failed handoff must not cost the patient their reply. It is
+            # logged loudly because a doctor silently seeing no intake is the
+            # exact failure this function exists to fix.
+            logger.exception("Could not publish the consultation for the doctor view.")
+
     chat_store.append(db, session, role="user", content=state["user_text"])
     chat_store.append(
         db,

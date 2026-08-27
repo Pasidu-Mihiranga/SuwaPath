@@ -456,6 +456,10 @@ def run(
         "rules": red_flags.rules_as_dicts(),
         "requires_emergency_facility": red_flags.requires_emergency_facility,
         "escalation_message": red_flags.escalation_message,
+        # Carried so the record handed to the doctor can list what the patient
+        # reported and what they explicitly denied. Concept ids, not free text.
+        "concepts": sorted(red_flags.concepts),
+        "negated_concepts": sorted(red_flags.negated_concepts),
     }
 
     # 2. An emergency ends question-asking. Nothing the patient could say next

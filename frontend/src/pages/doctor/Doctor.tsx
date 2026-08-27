@@ -302,6 +302,46 @@ export function PatientDetail() {
         </div>
       )}
 
+      {/* Safety banner.
+          Allergies buried as the fourth Field in a three-column grid is how a
+          patient gets prescribed the thing they react to — a doctor scanning
+          a record under time pressure reads the top, not every cell. These
+          are the facts that change what is safe to give someone, so they sit
+          above everything and are stated in words rather than implied by
+          colour, which not every viewer can use. */}
+      {(() => {
+        const allergies: string[] = [
+          ...(intake?.allergies ?? []),
+          ...(data.profile_history?.allergies ?? []),
+        ].filter(Boolean);
+        const unique = Array.from(new Set(allergies.map((a: string) => a.trim())));
+        const pregnant = data.patient?.is_pregnant;
+        if (!unique.length && !pregnant) return null;
+        return (
+          <div className="rounded-2xl border-2 border-danger-border bg-danger-surface p-4">
+            <div className="flex items-start gap-2.5">
+              <Icon name="warning" size={20} className="mt-0.5 shrink-0 text-danger-text" />
+              <div className="min-w-0">
+                {unique.length > 0 && (
+                  <p className="text-sm font-bold text-danger-text">
+                    Allergic to: {unique.join(" · ")}
+                  </p>
+                )}
+                {pregnant && (
+                  <p className="mt-0.5 text-sm font-bold text-danger-text">
+                    Currently pregnant — check before prescribing or imaging.
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-ink-600">
+                  From the patient's record and what they told the assistant.
+                  Confirm with them before prescribing.
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="grid lg:grid-cols-3 gap-5">
         <Card
           title="Pre-consultation Summary"
