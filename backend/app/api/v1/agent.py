@@ -30,7 +30,7 @@ from app.models.identity import AuditLog, User
 from app.privacy.boundary import egress_policy_note
 from app.core import crypto
 from app.services import chat_store, memory
-from app.services.ai_orchestrator import orchestrator_status
+from app.services.ai_orchestrator import detect_language, orchestrator_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -229,9 +229,15 @@ def _prepare(db: Session, user: User, payload: AgentRequest) -> tuple[dict, Chat
         if remembered:
             context["remembered"] = [f"{m.key.replace('_', ' ')}: {m.value}" for m in remembered]
 
+    # An explicit request language wins; otherwise reply in whatever script
+    # this message was written in, not the account's stored default — a
+    # patient who types in English shouldn't get a Sinhala answer just
+    # because their profile is set to Sinhala. Falls back to the session's
+    # language only when the message itself has no signal (e.g. just "7").
+    detected = detect_language(payload.message)
     state = {
         "user_text": payload.message.strip(),
-        "language": payload.language or session.language,
+        "language": payload.language or (str(detected) if detected else session.language),
         "user_id": user.id,
         "role": str(user.role),
         "session_id": session.id,
@@ -304,6 +310,11 @@ def _response(state: dict, result: dict, *, latency_ms: int) -> dict:
 
 
 def _persist(db: Session, session: ChatSession, state: dict, response: dict) -> None:
+    # Carry the language this turn was actually answered in forward onto the
+    # session, so a later ambiguous message (e.g. just "7") falls back to it
+    # instead of snapping back to the account's stored default language.
+    session.language = state["language"]
+
     # Learn durable facts *after* answering, so extraction never adds latency
     # to the reply the patient is waiting for.
     memory.learn_from_turn(
