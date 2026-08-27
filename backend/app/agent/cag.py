@@ -142,7 +142,8 @@ _CACHEABLE: list[dict[str, Any]] = [
             "what happens to my data", "do you send my data to ai",
             "is this chat really private", "is this chat private",
             "is this conversation private", "is my chat saved",
-            "are my messages stored", "do you keep my messages",
+            "are my messages stored", "do you keep my messages", "are my messages private",
+            "is my chat private", "do you read my messages",
         ],
         "answer": (
             "A fair thing to ask, and here is the honest version.\n\n"
@@ -210,12 +211,139 @@ _CACHEABLE: list[dict[str, Any]] = [
         "kind": "faq",
         "phrasings": [
             "what languages do you speak", "can you speak sinhala",
-            "do you support tamil", "can i type in sinhala",
+            "do you support tamil", "can i type in sinhala", "can i use this in sinhala",
+            "can i use this in tamil", "do you speak tamil",
+            "can i write in sinhala", "does it work in sinhala",
         ],
         "answer": (
             "Yes — **English, සිංහල and தமிழ்**. Type in whichever you're most "
             "comfortable with and I'll reply in the same language.\n\n"
             "You can also switch the whole app's language from your profile."
+        ),
+        "suggestions": [],
+    },
+
+    # ------------------------------------------------------------------
+    # Scope and limits.
+    #
+    # These are the questions where a written answer matters most. "Are you a
+    # doctor" and "can you prescribe" are asked constantly, and they are
+    # exactly the questions a model should not be improvising — the answer has
+    # to be the same every time, and it has to be the careful version. Being
+    # cached is a safety property here, not an optimisation.
+    # ------------------------------------------------------------------
+    {
+        "key": "am_i_a_doctor",
+        "kind": "capability",
+        "phrasings": [
+            "are you a doctor", "are you a real doctor", "are you human",
+            "is this a real doctor", "am i talking to a doctor",
+            "are you an ai", "are you a bot", "is this ai",
+            "can you diagnose me", "can you diagnose", "do you diagnose",
+            "will you tell me what disease i have",
+        ],
+        "answer": (
+            "No — I'm software, not a doctor, and I can't diagnose you.\n\n"
+            "What I can do is take your history the way a clinician would, "
+            "work out **how urgently** you should be seen, suggest which kind "
+            "of doctor fits, and help you get there. The urgency part is "
+            "decided by a fixed set of clinical rules rather than by an AI "
+            "model, so it gives the same answer every time and can be checked.\n\n"
+            "Diagnosis needs an examination. Treat what I say as a starting "
+            "point for a conversation with a clinician."
+        ),
+        "suggestions": ["Tell me what's bothering you", "Find me a doctor nearby"],
+    },
+    {
+        "key": "prescribing",
+        "kind": "capability",
+        "phrasings": [
+            "can you prescribe medicine", "can you prescribe",
+            "what medicine should i take", "what tablet should i take",
+            "give me a prescription", "what drug should i take",
+            "can you give me medicine", "what dose should i take",
+            "which antibiotic should i take",
+        ],
+        "answer": (
+            "I can't recommend medicines or doses — not even common ones.\n\n"
+            "That isn't caution for its own sake: the right choice depends on "
+            "your other conditions, what else you take, allergies, kidney and "
+            "liver function, and pregnancy. Those need someone who can examine "
+            "you and see your records.\n\n"
+            "I can help you get seen quickly, and explain what a medicine "
+            "you've **already been prescribed** is for."
+        ),
+        "suggestions": ["Find me a doctor nearby", "Explain my prescription"],
+    },
+    {
+        "key": "cost",
+        "kind": "faq",
+        "phrasings": [
+            "how much does it cost", "is this free", "do i have to pay",
+            "what is the price", "is there a fee", "how much do you charge",
+            "is suwapath free", "do i need to pay for this",
+        ],
+        "answer": (
+            "SuwaPath itself is free to use.\n\n"
+            "What care costs depends on where you go. Government hospitals and "
+            "clinics — the OPD, specialist clinics, and 1990 Suwa Seriya "
+            "ambulances — are free. Channelling a private consultant costs a "
+            "fee that varies by doctor and hospital; where I show you private "
+            "options I show the fee alongside them so you can compare."
+        ),
+        "suggestions": ["Find me a doctor nearby", "What is the OPD?"],
+    },
+    {
+        "key": "private_mode",
+        "kind": "faq",
+        "phrasings": [
+            "what is private mode", "how does private mode work",
+            "what is a private chat", "how do i chat privately",
+            "can i talk without it being saved", "delete my chat",
+            "do you store my data", "do you save my data",
+            "are my messages private", "where is my data stored",
+        ],
+        "answer": (
+            "**Private mode** is for anything you'd rather not leave in your "
+            "history. You set a 6-digit PIN, and the conversation is held in "
+            "memory only — nothing is written to your record, and it does not "
+            "appear in your chat history. Only the PIN reopens it.\n\n"
+            "Ordinary conversations **are** saved so you and your care team "
+            "can look back at them, and they're encrypted where they're "
+            "stored. You can delete any conversation at any time, and you can "
+            "see and erase everything the assistant remembers about you from "
+            "your settings."
+        ),
+        "suggestions": ["Start a private chat", "What do you remember about me?"],
+    },
+    {
+        "key": "cancel_appointment",
+        "kind": "faq",
+        "phrasings": [
+            "how do i cancel an appointment", "cancel my appointment",
+            "how do i reschedule", "can i change my appointment",
+            "i want to cancel my booking", "how do i change the date",
+        ],
+        "answer": (
+            "Open **Appointments**, find the booking, and choose Cancel. You "
+            "can rebook straight away from the same screen.\n\n"
+            "If it's for today and you can't get to it, cancelling still helps "
+            "— it frees the slot for someone else and keeps your record "
+            "accurate."
+        ),
+        "suggestions": ["Show my appointments"],
+    },
+    {
+        "key": "goodbye",
+        "kind": "greeting",
+        "phrasings": [
+            "bye", "goodbye", "see you", "that's all", "thats all",
+            "nothing else", "no more questions", "i'm done", "im done",
+        ],
+        "answer": (
+            "Take care. Come back any time — and if anything gets worse "
+            "before you're seen, don't wait for an appointment. For an "
+            "emergency, call **1990** (Suwa Seriya, free)."
         ),
         "suggestions": [],
     },
