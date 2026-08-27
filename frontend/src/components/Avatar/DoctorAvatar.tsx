@@ -34,9 +34,19 @@ import { scriptForRules, spokenForm, type FirstAidScript } from "./firstAid";
 type Mood = "calm" | "urgent";
 type State = "idle" | "speaking";
 
+/**
+ * Why the avatar appears. Emergencies are the loudest case but not the most
+ * common one: the patients who benefit most from spoken guidance are the ones
+ * using the elderly and maternal pathways, every day, for ordinary replies.
+ * Scoping this to emergencies only would have put the accessibility feature
+ * exactly where it is least needed.
+ */
+export type AvatarVariant = "emergency" | "care" | "doctor";
+
 export interface DoctorAvatarProps {
-  /** Deterministic escalation text from the rule engine. */
+  /** The text to speak. Never model-generated for the emergency variant. */
   message: string;
+  variant?: AvatarVariant;
   /** Red-flag rule ids that fired, most serious first. */
   ruleIds?: string[];
   urgency?: string;
@@ -97,11 +107,16 @@ function Face({ state, mouth, mood }: { state: State; mouth: number; mood: Mood 
 
 export default function DoctorAvatar({
   message,
+  variant = "emergency",
   ruleIds = [],
-  urgency = "emergency",
+  urgency = variant === "emergency" ? "emergency" : "routine",
   language = "en",
   speakerName,
-  autoSpeak = true,
+  // Only an emergency speaks unprompted. A care-pathway reply that starts
+  // talking on its own every turn is not an accessibility feature, it is a
+  // nuisance that gets muted — and then it is not there for the turn that
+  // mattered. The button is always visible; the speech is the patient's call.
+  autoSpeak = variant === "emergency",
   onDismiss,
 }: DoctorAvatarProps) {
   const [state, setState] = useState<State>("idle");
@@ -194,7 +209,11 @@ export default function DoctorAvatar({
 
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-ink-900">
-            {speakerName ? `${speakerName} says` : "SuwaPath Assistant"}
+            {speakerName
+              ? `${speakerName} says`
+              : variant === "doctor"
+                ? "A message from your care team"
+                : "SuwaPath Assistant"}
           </p>
           <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-ink-800">
             {message}
