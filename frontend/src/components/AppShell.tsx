@@ -68,6 +68,7 @@ const NAV: Record<Role, NavItem[]> = {
     { to: "/admin/providers", label: "Provider Verification", short: "Verify", icon: "verified", section: "Management", tab: true },
     { to: "/admin/facilities", label: "Facilities", icon: "facilities", section: "Management" },
     { to: "/admin/ai", label: "AI Configuration", short: "AI", icon: "ai", section: "Platform", tab: true },
+    { to: "/admin/security", label: "Security", icon: "shield", section: "Platform" },
     { to: "/admin/audit", label: "Audit Log", icon: "audit", section: "Platform" },
     { to: "/admin/notifications", label: "Notifications", icon: "notifications", section: "Platform" },
   ],

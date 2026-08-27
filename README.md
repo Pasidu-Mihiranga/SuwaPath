@@ -37,6 +37,7 @@ Built for **AI Buildathon 2026** · Team **Gmora** · SDG 3 — Good Health and 
 - [Project structure](#project-structure)
 - [API overview](#api-overview)
 - [Testing and verification](#testing-and-verification)
+- [Measuring the triage itself](#measuring-the-triage-itself)
 - [Plugging in your own CV model](#plugging-in-your-own-cv-model)
 - [Seeded dataset](#seeded-dataset)
 - [The autonomy layer](#the-autonomy-layer)
@@ -79,7 +80,8 @@ demand forecast. It is one workflow, not five dashboards.
 
 | | |
 |---|---|
-| **One assistant, not three screens** | Symptoms, reports, appointments and the confidential pathway are a single conversation. It takes a history the way a doctor does — up to four targeted questions — before it says anything. |
+| **One assistant, not three screens** | Symptoms, reports, appointments and the confidential pathway are a single conversation. It takes a history the way a doctor does before it says anything. |
+| **Questions chosen by reasoning, not a script** | Rather than walking a fixed list, it asks about the concept that would settle whichever red-flag rule is closest to firing. Measured against the fixed script on hidden emergencies: **8/8 caught versus 1/8**, for 0.6 extra questions. |
 | **Multilingual symptom intake** | Conversational triage in **English, Sinhala and Tamil**. Sinhala and Tamil input fires the same clinical rules as English — matching is on concepts, not translated strings — to the extent the lexicon lists the phrasing used, which is its real limit. |
 | **Deterministic red-flag engine** | 23 clinician-style rules decide urgency. **The LLM never does.** Chest pain + breathlessness + sweating → `EMERGENCY`, every time, in any language. |
 | **Capability-aware matching** | The differentiator. Not just "a dermatologist near you", but a dermatologist at a facility that can perform the **skin biopsy** the recommendation calls for. |
@@ -94,7 +96,11 @@ demand forecast. It is one workflow, not five dashboards.
 | **Models that are measured** | AUC, Brier and calibration on held-out data, shown on the dashboard beside the predictions they grade. |
 | **Acts without being asked** | Eight detectors run on a schedule and notice what nobody reports: care that was recommended but never booked, doses that stopped being taken, appointments that elapsed, check-ins that stopped. |
 | **Prepares, then asks** | A stalled referral becomes a specific bookable action — named doctor, a facility that can run the required test, real slot, real fee — waiting on one tap. Nothing clinical is ever automated. |
-| **Encrypted at rest** | AES-256-GCM over conversation content in the application layer, not just on the disk, with a 90-day retention window. |
+| **Encrypted at rest** | AES-256-GCM over conversations *and* the clinical record — conditions, allergies, medications, address — in the application layer, not just on the disk. |
+| **A trail that cannot be quietly edited** | Every record read, every amendment to a clinical note and every emergency override is hash-chained. Altering one breaks verification from that entry on, and the admin console checks it on demand. |
+| **Spoken guidance, not just text** | For an emergency, and for every reply on the elderly and maternal pathways, an avatar reads it aloud. It speaks only deterministic text — the rule engine's escalation, a reviewed first-aid script, or a doctor's own words. Never model output. |
+| **The consultation reaches the doctor** | A concluded chat publishes the patient's own words, the extracted history, the rules that fired and the transcript into the record the doctor opens — with allergies and pregnancy banner-level, not buried in a grid. No diagnosis, and no suggested diagnosis. |
+| **Measured, not asserted** | A 114-vignette labelled gold set and a five-arm benchmark, including the "just use one LLM call" alternative. It reports the results that do not flatter the design as well as the ones that do. |
 | **Answers before generating** | Greetings and product FAQs return reviewed answers from cache in ~0 ms. Nothing clinical is ever cached — near-identical questions have completely different correct answers. |
 | **Works without any API key** | Three model providers are tried in order and none is required. With none set, every feature still runs on deterministic engines and composers. Nothing hard-fails in a demo. |
 
@@ -876,21 +882,122 @@ Covers the autonomy layer against a virtual clock: detection without a
 request, idempotent re-runs, the per-patient cap, proposal-then-approval, and
 the safety negatives.
 
-**Current status: 73 scenario, 23 agentic, 23 reasoning, 15 role and 11
+**Current status: 73 scenario, 31 reasoning, 15 role, 23 agentic and 11
 coverage checks passing, 0 failing.**
+
+### Measuring the triage itself
+
+Everything above tests *behaviour*. None of it asked whether the clinical
+advice is any good — so there is a separate evaluation harness over a
+**114-vignette labelled gold set**.
+
+```bash
+cd backend && .venv/bin/python -m app.eval.harness --self-check      # validate the labels
+cd backend && .venv/bin/python -m app.eval.harness --arms A,A-full   # instant, no model needed
+cd backend && .venv/bin/python -m app.eval.harness --arms C-generic,C
+```
+
+The set is deliberately adversarial: alongside cases that should fire a rule
+it holds *near misses* one concept short, *benign* complaints that resemble
+emergencies, *negation traps* ("no chest pain, but…"), Sinhala and Tamil in
+both scripts and romanised, and *occult* emergencies that look ordinary until
+the right question is asked.
+
+Five architectures answer the same vignettes, so the comparison is like for
+like:
+
+| Arm | What it is | Emergency recall | Missed |
+|---|---|---|---|
+| **A** | Rules, opening message only | 84.4% | 7/45 |
+| **A-full** | Rules, given every answer up front | 100% | 0/45 |
+| **B** | One LLM call, no rules | 76.3% | 9/38 * |
+| **C-generic** | Fixed-script questioning (before) | 86.7% | 6/45 |
+| **C** | Rule-directed questioning (current) | **100%** | **0/45** |
+
+<sub>* Arm B was measured on the earlier 105-vignette set, so its row is not
+strictly comparable.</sub>
+
+Emergency recall leads because triage errors are asymmetric: a missed
+emergency can be fatal, an unnecessary escalation costs an afternoon. Accuracy
+alone scores a routine/self-care boundary call the same as missing a heart
+attack, so the report also gives a distance profile and names every missed
+emergency individually.
+
+Two findings worth stating plainly, because they cut against the system:
+
+- **The single LLM call is not incompetent** — 97.1% of its answers are within
+  one urgency level. What it cannot do is be *safe*: it missed postpartum
+  sepsis, infant sepsis, PPROM and a GI bleed, and missed 3 of 4 Sinhala
+  emergencies where the rule engine missed none in any language.
+- **The `positive` vignettes were derived from the rule set**, so the
+  deterministic arms hold a structural advantage there. The report marks those
+  cells and computes an unbiased subset separately.
 
 ---
 
 ## Plugging in your own CV model
 
 The adapter architecture, modality validation, heatmaps and the navigation
-hand-off are complete. Only the trained weights are pending.
+hand-off are complete.
 
 Drop your export in and restart:
 
 ```
-models/pneumonia/model.onnx
+models/pneumonia/general.onnx      # the default
+models/pneumonia/paediatric.onnx   # used when the patient is a child
+models/pneumonia/clean.onnx        # available, not routed to automatically
 ```
+
+### Converting a PyTorch checkpoint
+
+Torch is a ~2 GB dependency used exactly once, to turn weights into a portable
+graph, so it is deliberately **not** in `backend/requirements.txt` — the API
+serves the graph with `onnxruntime`, which it already has for embeddings.
+
+```bash
+python3 -m venv --system-site-packages .venv-convert
+.venv-convert/bin/pip install torchvision onnx onnxscript
+
+.venv-convert/bin/python backend/scripts/convert_pneumonia_onnx.py \
+    --checkpoint models/biofusion_pth/pneumonia_resnet50_best.pth \
+    --variant general
+```
+
+### Which model reads which image
+
+Age is the only signal that changes the answer: whether the chest belongs to a
+child changes the anatomy being read, while how the file was captured changes
+only its quality. There is deliberately **no camera-specific model** — the
+checkpoint that sounded like one (`combined_noPhone`) was trained with phone
+photographs *excluded*, so it is the one model that has never seen a
+photographed film.
+
+### The threshold is the safety decision, and it is measured
+
+A classifier outputs a probability; a decision needs a cut-off, and where that
+cut-off sits is a clinical choice. It does not transfer between datasets — the
+same architecture tuned for 95% sensitivity lands near 0.17 on one test set and
+0.37 on another. Shipping 0.5 because it is the midpoint is choosing an
+operating point by accident.
+
+```bash
+python scripts/calibrate_pneumonia.py --variant general \
+    --data /path/to/held_out_test_set --min-recall 0.95 --write
+```
+
+It picks the **highest threshold still meeting the sensitivity target** — for
+screening, a missed pneumonia sends someone home while a false positive sends
+them for an X-ray they did not need — and writes a sidecar reporting what
+STARD, CLAIM and device submissions ask for: sensitivity and specificity with
+**Wilson confidence intervals** rather than point estimates, PPV and NPV
+alongside the prevalence that makes them meaningful, the test set described,
+and an indeterminate band where the model declines to call it. It refuses to
+write if nothing reaches the target, and says so — that is a finding about the
+model, not a reason to lower the bar.
+
+Until calibrated, sidecars carry `threshold: null` and the loader logs *"no
+usable threshold"*. That is deliberate: a missing number is visible, whereas a
+default 0.5 looks like a decision somebody made.
 
 `OnnxPneumoniaAdapter` picks it up automatically and takes priority over the
 bundled baseline. The loader reads input shape, channel count and NCHW/NHWC
@@ -1144,11 +1251,26 @@ layers sit in front of it:
 
 ### Data at rest
 
-Conversation content is encrypted in the database with **AES-256-GCM**, applied
-in the application rather than left to disk encryption. Disk encryption
-protects a stolen machine; it does nothing about a leaked backup, a copied
-snapshot, a read replica, or a query that returns rows. Encrypting the column
-means ciphertext is what leaks.
+Patient records are encrypted in the database with **AES-256-GCM**, applied in
+the application rather than left to disk encryption. Disk encryption protects
+a stolen machine; it does nothing about a leaked backup, a copied snapshot, a
+read replica, or a query that returns rows. Encrypting the column means
+ciphertext is what leaks.
+
+Encrypted: conversation content, and on the patient profile the chronic
+conditions, allergies, current medications, past surgeries, family history,
+blood group, address and emergency contacts. Deliberately **not** encrypted:
+`User.full_name` and `email`, which the admin console searches with SQL `LIKE`
+— encrypting them would break patient lookup silently, returning nothing
+rather than erroring. That constraint is documented on the column types, not
+just discovered later.
+
+Why it is worth the trouble is regulatory as much as cryptographic. Under the
+HIPAA Breach Notification Rule, and GDPR Article 34(3)(a), encrypted health
+data whose keys were not also taken is not a reportable breach. Sri Lanka's
+**Personal Data Protection Act No. 9 of 2022** imposes the controller
+obligations that apply here. Encryption at this layer is what turns a stolen
+database from a notifiable catastrophe into an incident.
 
 Two key types cover two different threats:
 
@@ -1168,6 +1290,57 @@ authenticates as well as encrypts: a tampered row fails to decrypt instead of
 returning altered text.
 
 Ordinary conversations are deleted after **90 days**.
+
+### The audit trail is tamper-evident
+
+The audit table records what happened; a hash chain records that the record
+itself has not been changed. Each entry commits to its predecessor:
+
+```
+entry_hash = sha256(prev_hash || canonical(entry))
+```
+
+Alter a row, delete one, or reorder history, and every subsequent hash stops
+matching. It cannot *prevent* tampering — someone with database rights can
+still rewrite rows — but it converts silent alteration into something that has
+to be done completely and deliberately, and that fails verification if it is
+not. **System Admin → Security** verifies the chain on demand and names any
+entry that no longer adds up.
+
+The chain head is a locked single row rather than "the most recent entry",
+because two concurrent writers reading the same tip would fork the chain into
+branches that each verify in isolation.
+
+What is chained:
+
+| Event | Recorded |
+|---|---|
+| `phi.read` | Any access to a record by someone who is not the patient, with the **basis** it was allowed under — care relationship, guardian consent, system admin, or break-glass |
+| `consultation.amended` | Every change to a clinical note, with the **previous value** alongside the new one |
+| `consultation.completed` | The moment a note is sealed, so later amendments are unambiguously post-hoc |
+| `phi.break_glass_declared` | An emergency override, with the written reason |
+| `doctor.message_sent` | A message sent to a patient |
+
+Reading is logged, not just writing. The harm in a medical system is usually
+someone opening a record they had no business opening, and a log of
+modifications cannot show that — which is why HIPAA §164.312(b) asks for
+access logging specifically. Self-access is deliberately not logged: it is not
+a disclosure, and recording it would bury the entries that matter.
+
+**Blockchain is not used, and does not belong here.** A distributed ledger
+solves "no single party is trusted", which is not this problem — the regulator
+wants assurance that *the operator* cannot quietly alter records. A hash chain
+gives exactly that, with no consensus, no nodes and nothing to sync.
+
+### Break-glass: emergency access
+
+Refusing a clinician access to an unconscious patient is not the safe option
+it looks like — people route around a system that does that, by sharing
+logins or by not using it. So the override exists, and **accountability rather
+than prevention** is the control: it requires a written clinical reason,
+expires after four hours, and puts both the declaration and every record read
+under it into the tamper-evident chain. Unreviewed overrides surface in
+**System Admin → Security** for sign-off, and the review is itself audited.
 
 End-to-end encryption is not possible for an AI assistant — the server must
 read the message to send it to a model. Any product claiming otherwise is
