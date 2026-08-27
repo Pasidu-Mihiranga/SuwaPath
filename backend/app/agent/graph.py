@@ -658,6 +658,13 @@ def consult_agent(state: AgentState) -> dict:
             "coverage": turn.coverage,
             "specialty": turn.specialty,
             "specialty_name": turn.specialty_name,
+            # Carried to the client so the spoken escalation can read the
+            # rule engine's own words rather than the assistant's prose, and
+            # so the first-aid script can be selected by the rule that
+            # actually fired. Rule ids, labels and rationales only — the
+            # payload contains no patient data.
+            "urgency": turn.urgency,
+            "red_flags": turn.red_flags,
         },
         "red_flags": turn.red_flags,
         "trace": [{
