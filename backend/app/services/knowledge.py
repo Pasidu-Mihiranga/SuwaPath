@@ -204,7 +204,33 @@ class KnowledgeService:
     # "who is Kusal Mendis" used to come back with the three least-unrelated
     # health articles in the corpus, which the model then dutifully wrote up.
     # Anything below this is treated as no match at all.
+    #
+    # There are two floors because there are two backends, and their scores
+    # are not the same quantity. Embedding cosine similarity sits high even
+    # for loose matches; TF-IDF cosine over a small corpus sits far lower —
+    # a *correct* top hit for "fever and calf pain after paddy work" scores
+    # 0.24. One floor of 0.35 for both meant that whenever Qdrant was
+    # unavailable — which happens on any restart, and whenever another
+    # process holds the embedded store — the entire knowledge base went
+    # silently unreachable while still reporting itself healthy.
+    #
+    # The TF-IDF figure is calibrated, not guessed: across six on-topic and
+    # four off-topic queries the lowest relevant score was 0.119 and the
+    # highest irrelevant was 0.133. They overlap, so there is no perfect
+    # split; 0.15 admits five of six relevant and rejects all four noise
+    # queries. Re-check it if the corpus grows substantially, since TF-IDF
+    # scores move with corpus size.
     MIN_RELEVANCE = 0.35
+    MIN_RELEVANCE_TFIDF = 0.15
+
+    @property
+    def min_relevance(self) -> float:
+        """The floor appropriate to whichever backend actually answered."""
+        return (
+            self.MIN_RELEVANCE_TFIDF
+            if self._backend.startswith("tfidf")
+            else self.MIN_RELEVANCE
+        )
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -434,7 +460,7 @@ class KnowledgeService:
         Returns empty when nothing is relevant, so the caller can say it does
         not know rather than grounding on noise.
         """
-        floor = self.MIN_RELEVANCE if min_score is None else min_score
+        floor = self.min_relevance if min_score is None else min_score
         results = [
             r for r in self.search(query, limit=limit, collection=collection)
             if r.score >= floor
@@ -450,7 +476,7 @@ class KnowledgeService:
         self, query: str, *, limit: int = 6, min_score: float | None = None
     ) -> list[RetrievedDoc]:
         """Directory search returning results with their structured payloads."""
-        floor = self.MIN_RELEVANCE if min_score is None else min_score
+        floor = self.min_relevance if min_score is None else min_score
         return [
             r for r in self.search(query, limit=limit, collection=PROVIDERS)
             if r.score >= floor
@@ -467,7 +493,7 @@ class KnowledgeService:
             "backend": self._backend,
             "collections": dict(self._counts),
             "total_documents": len(self._docs),
-            "min_relevance": self.MIN_RELEVANCE,
+            "min_relevance": self.min_relevance,
         }
 
 
