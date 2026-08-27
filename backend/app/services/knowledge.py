@@ -192,6 +192,35 @@ class _TfidfIndex:
 # --------------------------------------------------------------------------
 # Document sources
 # --------------------------------------------------------------------------
+_DEFAULT_QDRANT_URL = "http://127.0.0.1:6333"
+
+
+def _detect_local_server(url: str = _DEFAULT_QDRANT_URL, timeout: float = 0.4) -> str | None:
+    """Use a Qdrant server on the usual port if one happens to be running.
+
+    Embedded Qdrant takes an exclusive lock on its storage directory, so only
+    one process can hold it. During development that is normally the API
+    server, and every other process — the evaluation harness, a test script, a
+    one-off query — silently drops to the TF-IDF index instead. That is how a
+    retrieval bug survived: the fallback was what ran locally, and the fallback
+    was the thing that was broken.
+
+    Auto-detecting means `docker compose up -d qdrant` is the whole fix, with
+    no configuration change and nothing to remember. An explicit `QDRANT_URL`
+    still wins; this only fills the gap when nothing was configured.
+    """
+    try:
+        import urllib.request
+
+        with urllib.request.urlopen(f"{url}/healthz", timeout=timeout) as response:
+            if response.status == 200:
+                logger.info("Detected a Qdrant server at %s; using it.", url)
+                return url
+    except Exception:  # noqa: BLE001 — absence is the normal case, not an error
+        return None
+    return None
+
+
 def clinical_documents() -> list[IndexedDoc]:
     """The curated corpus, chunked so each vector covers one idea."""
     docs: list[IndexedDoc] = []
@@ -282,6 +311,8 @@ class KnowledgeService:
         self._tfidf: _TfidfIndex | None = None
         self._docs: dict[str, IndexedDoc] = {}
         self._counts: dict[str, int] = {}
+        self._mode = ""
+        self._fallback_reason = ""
 
     # -- lifecycle ---------------------------------------------------------
     def ensure_ready(self) -> None:
@@ -294,11 +325,27 @@ class KnowledgeService:
                 self._init_qdrant()
                 self._backend = "qdrant+minilm"
             except Exception as exc:  # noqa: BLE001 - any failure must degrade
-                logger.warning(
-                    "Qdrant/MiniLM retrieval unavailable (%s); "
-                    "falling back to the in-process TF-IDF index.",
-                    exc,
-                )
+                self._fallback_reason = str(exc)
+                # Name the cause and the fix. "Already accessed by another
+                # instance" is the common one and it is not a failure at all —
+                # it means the API server holds the embedded store and this is
+                # a second process. Left as a generic warning, it reads like
+                # noise and gets ignored, which is how the fallback ended up
+                # being the path nobody was testing.
+                if "already accessed" in self._fallback_reason.lower():
+                    logger.warning(
+                        "Embedded Qdrant is locked by another process, so this "
+                        "one is using the weaker TF-IDF index. Both processes "
+                        "can share a server instead: `docker compose up -d "
+                        "qdrant` — it is detected automatically, no config "
+                        "change needed."
+                    )
+                else:
+                    logger.warning(
+                        "Qdrant/MiniLM retrieval unavailable (%s); "
+                        "falling back to the in-process TF-IDF index.",
+                        exc,
+                    )
                 self._load_documents()
                 self._tfidf = _TfidfIndex(list(self._docs.values()))
                 self._backend = "tfidf-fallback"
@@ -344,11 +391,15 @@ class KnowledgeService:
             self._embedder = TextEmbedding(model_name=settings.embedding_model)
 
         if self._client is None:
-            if settings.qdrant_url:
-                self._client = QdrantClient(url=settings.qdrant_url)
+            url = settings.qdrant_url or _detect_local_server()
+            if url:
+                self._client = QdrantClient(url=url)
+                self._mode = f"server {url}"
             else:
-                # Local on-disk mode: real Qdrant semantics, no server to run.
+                # Local on-disk mode: real Qdrant semantics, no server to run,
+                # and an exclusive file lock. One process at a time.
                 self._client = QdrantClient(path=str(settings.qdrant_path))
+                self._mode = "embedded"
 
         self._load_documents()
         existing = {c.name for c in self._client.get_collections().collections}
@@ -530,12 +581,27 @@ class KnowledgeService:
 
     def stats(self) -> dict:
         self.ensure_ready()
-        return {
+        stats = {
             "backend": self._backend,
+            "mode": self._mode or "n/a",
             "collections": dict(self._counts),
             "total_documents": len(self._docs),
             "min_relevance": self.min_relevance,
         }
+        # Say why the weaker index is in use, and what to do about it. A
+        # status endpoint reporting "tfidf-fallback" with no reason gives an
+        # operator nothing to act on, and this particular fallback is usually
+        # one command away from being fixed.
+        if self._backend.startswith("tfidf"):
+            stats["degraded"] = True
+            stats["reason"] = self._fallback_reason[:200] or "unknown"
+            if "already accessed" in self._fallback_reason.lower():
+                stats["fix"] = (
+                    "Embedded Qdrant allows one process at a time. Run "
+                    "`docker compose up -d qdrant` — it is detected "
+                    "automatically."
+                )
+        return stats
 
 
 knowledge_service = KnowledgeService()
