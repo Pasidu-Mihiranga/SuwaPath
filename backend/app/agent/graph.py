@@ -223,11 +223,33 @@ def route_node(state: AgentState) -> dict:
     }
 
 
+# An italic or bold line on its own — the safety disclaimer the judge appends.
+_TRAILING_NOTE = re.compile(r"^\s*[_*].*[_*][\s.]*$")
+
+
 def _awaiting_answer(history: list[dict]) -> bool:
-    """Did we just ask the patient a question?"""
+    """Did we just ask the patient a question?
+
+    The naive test — does the stored turn end in a question mark — was defeated
+    by our own safety layer. It appends "_This is care-navigation guidance, not
+    a diagnosis..._" after the question, so a turn that asked "Do you have a
+    fever?" was stored ending in an underscore. The consultation was then
+    treated as closed on the very next message, and a patient who had been
+    answering questions about their headache got the generic "I can help you
+    describe a symptom" reply instead.
+
+    So the disclaimer is stripped before the check. Anything that reads as a
+    standalone italic note is dropped from the end, and the last real line is
+    the one that decides.
+    """
     for message in reversed(history):
-        if message.get("role") == "assistant":
-            return message.get("content", "").rstrip().endswith("?")
+        if message.get("role") != "assistant":
+            continue
+        lines = [line.strip() for line in (message.get("content") or "").splitlines()]
+        lines = [line for line in lines if line]
+        while lines and _TRAILING_NOTE.match(lines[-1]):
+            lines.pop()
+        return bool(lines) and lines[-1].endswith("?")
     return False
 
 
@@ -588,18 +610,42 @@ def _deterministic_answer(state: AgentState, route: str, tool_texts: list[str]) 
     """A readable reply assembled from tool output without a model."""
     facts = [text.strip() for text in tool_texts if text and text.strip()]
     if not facts:
+        # Two different situations were sharing one message. "I don't have
+        # anything on file for that yet" is right when a lookup came back
+        # empty, and wrong for "who won the cricket match" — it implies the
+        # answer might arrive later. The direct route runs no tools at all, so
+        # reaching here with nothing means the question was outside what this
+        # product does, and saying so plainly is more useful than hedging.
+        if route == "direct":
+            return (
+                "That's outside what I can help with — I only cover health and "
+                "care here.\n\n"
+                "**What I can do:** talk through a symptom, explain a report "
+                "you've uploaded, find a doctor or hospital, or check your "
+                "appointments and medicines. Which would help?"
+            )
         return (
-            "I don't have anything on file for that yet.\n\n"
+            "I couldn't find anything on file for that.\n\n"
             "**I can help you** describe a symptom, understand a report you've "
             "uploaded, or find and book a doctor. Which would be useful?"
         )
 
     lines = [_DETERMINISTIC_HEADING.get(route, "**Here's what I found**"), ""]
     for fact in facts:
-        # Tool text is already newline-separated records; render each as a
-        # bullet so the result is scannable rather than one long paragraph.
+        # Short lines are records and read well as bullets. Long ones are
+        # prose — a facility description bulleted whole produced a single
+        # 90-word bullet, which is a paragraph wearing a dot. Those are kept
+        # as paragraphs, and a line ending in a colon is treated as the
+        # heading it plainly is.
         for piece in [p.strip() for p in fact.split("\n") if p.strip()]:
-            lines.append(piece if piece.startswith(("-", "*", "#")) else f"- {piece}")
+            if piece.startswith(("-", "*", "#")):
+                lines.append(piece)
+            elif piece.endswith(":"):
+                lines += ["", f"**{piece.rstrip(':')}**", ""]
+            elif len(piece) > 160:
+                lines += ["", piece, ""]
+            else:
+                lines.append(f"- {piece}")
 
     lines += [
         "",
