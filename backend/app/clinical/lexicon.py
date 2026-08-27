@@ -253,6 +253,16 @@ NEGATION_MARKERS = (
     "නැහැ", "නෑ", "naha", "nathi", "இல்லை",
 )
 
+# Words that end the reach of a preceding denial. "I have no chest pain, but
+# my shoulder aches" denies the chest pain and asserts the shoulder — without
+# these, the denial swallowed both. Commas would be the natural marker but
+# `normalise` has already removed them, so these are the ones left standing.
+CLAUSE_RESETS = (
+    " but ", " however ", " just ", " only ", " though ", " although ",
+    " except ", " otherwise ", " apart from ", " besides ",
+    " නමුත් ", " namuth ", " ஆனால் ",
+)
+
 _CONCEPT_INDEX: list[tuple[str, str]] = sorted(
     ((term.lower(), concept) for concept, terms in LEXICON.items() for term in terms),
     key=lambda pair: len(pair[0]),
@@ -273,9 +283,31 @@ def normalise(text: str) -> str:
 
 
 def _is_negated(haystack: str, position: int) -> bool:
-    """True when a negation marker appears in the ~28 chars before a match."""
+    """True when a negation marker governs the concept at `position`.
+
+    A plain 28-character lookback is not enough, because a denial of one
+    symptom runs straight on into the next one: in "no fever, no vomiting,
+    just a mild headache" the window before *headache* still contains "no ",
+    so the headache the patient plainly asserted was being discarded. The
+    failure direction is under-triage, which is the one that matters.
+
+    Punctuation cannot be used to find the clause boundary — `normalise`
+    replaces commas with spaces before this ever runs — so the boundary is
+    detected from the words that survive. A contrast word resets the negation
+    only when it appears *after* the last negation marker in the window, so
+    "no pain but no fever either" still correctly negates fever.
+    """
     window = haystack[max(0, position - 28) : position]
-    return any(marker in window for marker in NEGATION_MARKERS)
+
+    last_negation = max(
+        (window.rfind(marker) for marker in NEGATION_MARKERS),
+        default=-1,
+    )
+    if last_negation == -1:
+        return False
+
+    tail = window[last_negation:]
+    return not any(reset in tail for reset in CLAUSE_RESETS)
 
 
 def extract_concepts(text: str) -> tuple[set[str], set[str]]:
@@ -317,15 +349,27 @@ def extract_concepts(text: str) -> tuple[set[str], set[str]]:
 
 
 def _proximity_is_negated(haystack: str, tokens: list[str], concept: str) -> bool:
-    """Check for negation before the body-part token that produced `concept`."""
+    """Check for negation before the body-part token that produced `concept`.
+
+    Every mention is checked, not just the first. The original took the first
+    occurrence anywhere in the string, so a denial attached to one symptom
+    silently negated a different one mentioned later. One un-negated mention
+    is enough to treat the concept as asserted, which is the same precedence
+    `extract_concepts` already applies to direct matches — and it errs toward
+    hearing a symptom rather than discarding it.
+    """
     part_terms = next(
         (parts for parts, _, c in PROXIMITY_RULES if c == concept), set()
     )
+    mentioned = False
     for token in part_terms:
-        idx = haystack.find(token)
-        if idx != -1 and _is_negated(haystack, idx):
-            return True
-    return False
+        index = haystack.find(token)
+        while index != -1:
+            mentioned = True
+            if not _is_negated(haystack, index):
+                return False
+            index = haystack.find(token, index + 1)
+    return mentioned
 
 
 def concept_label(concept: str) -> str:
