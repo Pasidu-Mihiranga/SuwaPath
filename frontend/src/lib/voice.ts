@@ -115,23 +115,65 @@ export function listen(options: {
  * I'd do asterisk asterisk" is unusable, and the structural markers carry no
  * meaning out loud.
  */
-export function speak(markdown: string, language = "en"): void {
-  if (!speechSupported()) return;
+export interface SpeakOptions {
+  language?: string;
+  /** Fired at each word boundary — drives the avatar's mouth. */
+  onBoundary?: () => void;
+  onStart?: () => void;
+  onEnd?: () => void;
+  /**
+   * Called instead of speaking when no voice for `language` is installed.
+   * Sinhala and Tamil voices are genuinely rare, and reading Sinhala aloud
+   * with an English voice produces confident nonsense — worse than silence
+   * for someone relying on it because they cannot read the screen.
+   */
+  onUnavailable?: () => void;
+}
+
+/** Is there a voice installed that can actually pronounce this language? */
+export function voiceFor(language: string): SpeechSynthesisVoice | null {
+  if (!speechSupported()) return null;
+  const tag = LANG_TAGS[language] ?? LANG_TAGS.en;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((v) => v.lang === tag)
+    ?? voices.find((v) => v.lang.startsWith(tag.split("-")[0]))
+    ?? null
+  );
+}
+
+export function speak(markdown: string, options: SpeakOptions | string = {}): void {
+  // The original signature was speak(text, language). Existing callers pass a
+  // language string, so both are accepted rather than breaking them.
+  const opts: SpeakOptions =
+    typeof options === "string" ? { language: options } : options;
+  const language = opts.language ?? "en";
+
+  if (!speechSupported()) {
+    opts.onUnavailable?.();
+    return;
+  }
 
   const text = stripMarkdown(markdown);
   if (!text) return;
+
+  const match = voiceFor(language);
+  if (!match && language !== "en") {
+    opts.onUnavailable?.();
+    return;
+  }
 
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = LANG_TAGS[language] ?? LANG_TAGS.en;
   utterance.rate = 0.97;
-
-  // Prefer a voice that actually matches the language; browsers otherwise
-  // read Sinhala text with an English voice, which is incomprehensible.
-  const voices = window.speechSynthesis.getVoices();
-  const match = voices.find((v) => v.lang === utterance.lang)
-    ?? voices.find((v) => v.lang.startsWith(utterance.lang.split("-")[0]));
   if (match) utterance.voice = match;
+
+  utterance.onstart = () => opts.onStart?.();
+  utterance.onend = () => opts.onEnd?.();
+  // Not every engine emits boundary events. The avatar therefore treats
+  // these as a bonus for accuracy, never as its only source of animation.
+  utterance.onboundary = () => opts.onBoundary?.();
 
   window.speechSynthesis.speak(utterance);
 }
