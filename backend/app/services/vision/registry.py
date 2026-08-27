@@ -23,30 +23,25 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 # Which trained model answers which upload
 # --------------------------------------------------------------------------
-# Three checkpoints were trained on different data, all the same ResNet50
-# architecture. Converted by `scripts/convert_pneumonia_onnx.py` into
-# `general.onnx`, `photo.onnx` and `paediatric.onnx`.
+# Three checkpoints, same ResNet50 architecture, different training data.
+# Converted by `scripts/convert_pneumonia_onnx.py`.
 #
-# ⚠ `photo` comes from a checkpoint named `combined_noPhone`, which most
-# naturally reads as "trained on combined data with phone photographs
-# EXCLUDED". If that reading is right, routing camera uploads to it is exactly
-# backwards — it would be the one model that never saw a photograph of a film.
-# The checkpoints carry no metadata, so the filename is the only evidence and
-# it cannot settle the question.
+#   general     `pneumonia_resnet50_best`            - the default
+#   clean       `pneumonia_resnet50_combined_noPhone` - phone photographs were
+#               EXCLUDED from its training set (confirmed with the author).
+#               It is therefore the wrong model for a photographed film: it
+#               has never seen one. Not routed to automatically; kept because
+#               a model trained on cleaner data is worth comparing against
+#               once both have measured operating points.
+#   paediatric  `pneumonia_resnet50_pediatric_only`  - children only
 #
-# Until someone who knows confirms it, camera uploads keep using `general`.
-# Flip `PHOTO_MODEL_CONFIRMED` to True once verified; nothing else changes.
-# Being wrong here degrades accuracy silently on exactly the lowest-quality
-# images, which is where a screening model is already weakest.
-PHOTO_MODEL_CONFIRMED = False
-
-# Paediatric chest X-rays differ enough from adult ones that a model trained
-# only on children is the right tool when we know the patient is a child.
+# There is deliberately no camera-specific model. The one that sounded like it
+# was is the one that saw the fewest photographs.
 PAEDIATRIC_MAX_AGE = 16
 
 _VARIANTS: dict[str, ModelAdapter] = {
     "general": OnnxPneumoniaAdapter("general"),
-    "photo": OnnxPneumoniaAdapter("photo"),
+    "clean": OnnxPneumoniaAdapter("clean"),
     "paediatric": OnnxPneumoniaAdapter("paediatric"),
 }
 
@@ -54,15 +49,15 @@ _VARIANTS: dict[str, ModelAdapter] = {
 def select_variant(*, age: int | None = None, from_camera: bool = False) -> str:
     """Which trained model should read this image.
 
-    Age wins over capture method: whether the chest belongs to a child changes
-    the anatomy the model is reading, while how the file was captured changes
-    only its quality. A blurred paediatric film is still a paediatric film.
+    Age is the only signal that changes the answer. Whether the chest belongs
+    to a child changes the anatomy being read; how the file was captured
+    changes only its quality, and no model here was trained to handle that
+    better than the others. `from_camera` is accepted so callers need not
+    change if that ever stops being true.
     """
     if age is not None and age <= PAEDIATRIC_MAX_AGE:
         if _VARIANTS["paediatric"].is_available():
             return "paediatric"
-    if from_camera and PHOTO_MODEL_CONFIRMED and _VARIANTS["photo"].is_available():
-        return "photo"
     return "general"
 
 
@@ -70,7 +65,7 @@ def select_variant(*, age: int | None = None, from_camera: bool = False) -> str:
 _REGISTRY: dict[ImageModality, list[ModelAdapter]] = {
     ImageModality.CHEST_XRAY: [
         _VARIANTS["general"],
-        _VARIANTS["photo"],
+        _VARIANTS["clean"],
         _VARIANTS["paediatric"],
         BaselinePneumoniaAdapter(),
     ],
