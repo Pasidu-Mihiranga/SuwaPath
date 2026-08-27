@@ -352,6 +352,13 @@ def _persist(db: Session, session: ChatSession, state: dict, response: dict) -> 
             "latency_ms": response["latency_ms"],
             "cache_hit": bool(response["cache"].get("hit")),
             "guard": response["guard"],
+            # Urgency and the rules that fired, so a reopened conversation
+            # shows what it showed the first time. Without this a restored
+            # emergency turn lost its escalation entirely — the spoken avatar
+            # never appeared, and the urgency badge was blank, on exactly the
+            # conversation a patient is most likely to go back and re-read.
+            # Rule ids and labels only; no patient data.
+            "consult": response.get("consult") or {},
         },
     )
 

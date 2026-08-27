@@ -225,6 +225,10 @@ export default function Assistant() {
           latencyMs: m.meta?.latency_ms,
           provider: m.meta?.provider,
           cache: { hit: m.meta?.cache_hit },
+          // Restores the urgency badge and the spoken escalation. A reopened
+          // emergency should look like it did when it was first answered.
+          consult: m.meta?.consult,
+          guard: m.meta?.guard,
         })),
       );
       setSessionId(id);
