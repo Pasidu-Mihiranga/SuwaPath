@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Markdown from "../../components/Markdown";
 import ProviderDeck, { type ProviderCard } from "../../components/ProviderDeck";
+import DoctorAvatar from "../../components/Avatar/DoctorAvatar";
 import {
   Avatar,
   Brand,
@@ -1242,9 +1243,28 @@ function TurnBubble({
   const tests = turn.structured?.consult?.consult?.tests ?? [];
   const urgency = turn.consult?.urgency;
 
+  // The spoken escalation. Shown only for an emergency, and given the message
+  // the *rule engine* wrote rather than the assistant's prose — the avatar is
+  // deliberately not allowed to voice model output.
+  const redFlags = turn.consult?.red_flags as
+    | { escalation_message?: string; rules?: { rule_id?: string }[] }
+    | undefined;
+  const escalation = redFlags?.escalation_message;
+  const firedRules = (redFlags?.rules ?? [])
+    .map((rule) => rule?.rule_id)
+    .filter((id): id is string => Boolean(id));
+
   return (
     <div className="flex justify-start">
       <div className="min-w-0 max-w-[92%] space-y-2">
+        {urgency === "emergency" && escalation && (
+          <DoctorAvatar
+            message={escalation}
+            ruleIds={firedRules}
+            urgency={urgency}
+            language={language}
+          />
+        )}
         <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3 text-ink-800">
           <Markdown content={turn.content} />
         </div>
