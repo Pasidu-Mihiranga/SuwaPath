@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import build_patient_context, resolve_patient_access
+from app.api.deps import build_patient_context, get_patient_profile, resolve_patient_access
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import get_current_user
@@ -432,6 +432,15 @@ def upload_image(
     file: UploadFile = File(...),
     modality: ImageModality = Form(default=ImageModality.CHEST_XRAY),
     patient_user_id: str | None = Form(default=None),
+    # Photographed off a screen or a light box rather than exported from the
+    # imaging system. The client knows which button was pressed; the file
+    # itself does not reliably say, since a camera JPEG and an exported JPEG
+    # look the same without EXIF that phones often strip.
+    from_camera: bool = Form(default=False),
+    # Overrides the age on file. A guardian uploading for a child, or a
+    # profile with no date of birth, both need the person doing the upload to
+    # be able to say so.
+    is_child: bool | None = Form(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -461,8 +470,23 @@ def upload_image(
     db.flush()
 
     heatmap_name = f"{Path(stored_path).stem}_heatmap.png"
+
+    # Which trained model reads this. An explicit `is_child` from the uploader
+    # beats the profile: the person holding the film knows whose chest it is,
+    # and a guardian's own date of birth is the wrong answer for their child's
+    # X-ray.
+    profile = get_patient_profile(db, target_id)
+    age = profile.age if profile else None
+    if is_child is True:
+        age = min(age, 10) if age is not None else 10
+    elif is_child is False:
+        age = max(age, 18) if age is not None else 18
+
     try:
-        result = screen_image(stored_path, modality, heatmap_name=heatmap_name)
+        result = screen_image(
+            stored_path, modality, heatmap_name=heatmap_name,
+            age=age, from_camera=from_camera,
+        )
     except ImageValidationError as exc:
         image.processing_status = ProcessingStatus.FAILED
         image.validation_passed = False

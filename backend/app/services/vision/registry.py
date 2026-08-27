@@ -20,10 +20,58 @@ from app.services.vision.pneumonia import (
 
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------
+# Which trained model answers which upload
+# --------------------------------------------------------------------------
+# Three checkpoints were trained on different data, all the same ResNet50
+# architecture. Converted by `scripts/convert_pneumonia_onnx.py` into
+# `general.onnx`, `photo.onnx` and `paediatric.onnx`.
+#
+# ⚠ `photo` comes from a checkpoint named `combined_noPhone`, which most
+# naturally reads as "trained on combined data with phone photographs
+# EXCLUDED". If that reading is right, routing camera uploads to it is exactly
+# backwards — it would be the one model that never saw a photograph of a film.
+# The checkpoints carry no metadata, so the filename is the only evidence and
+# it cannot settle the question.
+#
+# Until someone who knows confirms it, camera uploads keep using `general`.
+# Flip `PHOTO_MODEL_CONFIRMED` to True once verified; nothing else changes.
+# Being wrong here degrades accuracy silently on exactly the lowest-quality
+# images, which is where a screening model is already weakest.
+PHOTO_MODEL_CONFIRMED = False
+
+# Paediatric chest X-rays differ enough from adult ones that a model trained
+# only on children is the right tool when we know the patient is a child.
+PAEDIATRIC_MAX_AGE = 16
+
+_VARIANTS: dict[str, ModelAdapter] = {
+    "general": OnnxPneumoniaAdapter("general"),
+    "photo": OnnxPneumoniaAdapter("photo"),
+    "paediatric": OnnxPneumoniaAdapter("paediatric"),
+}
+
+
+def select_variant(*, age: int | None = None, from_camera: bool = False) -> str:
+    """Which trained model should read this image.
+
+    Age wins over capture method: whether the chest belongs to a child changes
+    the anatomy the model is reading, while how the file was captured changes
+    only its quality. A blurred paediatric film is still a paediatric film.
+    """
+    if age is not None and age <= PAEDIATRIC_MAX_AGE:
+        if _VARIANTS["paediatric"].is_available():
+            return "paediatric"
+    if from_camera and PHOTO_MODEL_CONFIRMED and _VARIANTS["photo"].is_available():
+        return "photo"
+    return "general"
+
+
 # Highest priority first within each modality.
 _REGISTRY: dict[ImageModality, list[ModelAdapter]] = {
     ImageModality.CHEST_XRAY: [
-        OnnxPneumoniaAdapter(),
+        _VARIANTS["general"],
+        _VARIANTS["photo"],
+        _VARIANTS["paediatric"],
         BaselinePneumoniaAdapter(),
     ],
     # Future modalities register here; nothing else needs to change:
@@ -78,9 +126,24 @@ def screen_image(
     modality: ImageModality,
     *,
     heatmap_name: str | None = None,
+    age: int | None = None,
+    from_camera: bool = False,
 ) -> InferenceResult:
-    """Validate then screen an image, writing a heatmap when supported."""
-    adapter = get_adapter(modality)
+    """Validate then screen an image, writing a heatmap when supported.
+
+    `age` and `from_camera` choose between trained variants for chest X-rays.
+    Both are hints: when the matching variant is absent the general model
+    answers, so a deployment carrying one model behaves exactly as before.
+    """
+    if modality == ImageModality.CHEST_XRAY:
+        variant = select_variant(age=age, from_camera=from_camera)
+        adapter = _VARIANTS[variant]
+        if not adapter.is_available():
+            adapter = get_adapter(modality)
+        else:
+            logger.info("Screening with the %s model.", variant)
+    else:
+        adapter = get_adapter(modality)
     image = load_grayscale(Path(image_path))
 
     validation = adapter.validate(image)

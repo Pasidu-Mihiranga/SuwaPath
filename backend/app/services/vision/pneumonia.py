@@ -255,7 +255,14 @@ class OnnxPneumoniaAdapter(ModelAdapter):
     supports_heatmap = True
     is_trained_model = True
 
-    def __init__(self) -> None:
+    def __init__(self, variant: str = "") -> None:
+        # A named variant loads `<variant>.onnx`; the empty default keeps the
+        # original behaviour of taking whatever single .onnx is present, so a
+        # deployment with one unnamed model still works untouched.
+        self.variant = variant
+        if variant:
+            self.name = f"pneumonia_onnx_{variant}"
+            self.model_name = f"Chest X-ray pneumonia classifier ({variant})"
         self._session = None
         self._input_name: str | None = None
         self._input_size = 224
@@ -268,6 +275,9 @@ class OnnxPneumoniaAdapter(ModelAdapter):
         directory = settings.cv_model_dir / "pneumonia"
         if not directory.is_dir():
             return None
+        if self.variant:
+            named = directory / f"{self.variant}.onnx"
+            return named if named.is_file() else None
         candidates = sorted(directory.glob("*.onnx"))
         return candidates[0] if candidates else None
 

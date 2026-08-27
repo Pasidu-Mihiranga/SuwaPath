@@ -58,3 +58,9 @@ SuwaPath_Pitch_Deck.pdf
 
 # Evaluation checkpoints (regenerate with: python -m app.eval.harness)
 backend/app/eval/results*.json
+
+# One-off model-conversion environment (torch is not a runtime dependency)
+.venv-convert/
+# Converted model weights — too large for git; ship as a release asset
+models/**/*.onnx
+models/**/*.onnx.data
