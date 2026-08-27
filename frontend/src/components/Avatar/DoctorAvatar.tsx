@@ -129,12 +129,15 @@ function Face({
       <path d="M 16 78 Q 20 60 42 60 Q 64 60 68 78" fill="currentColor" opacity="0.14" />
       <circle cx="42" cy="36" r="21" fill="url(#sp-av-face)" />
 
-      {/* Brows. They sit lower and closer in the urgent state, which is what
-          makes the difference legible without changing colour alone —
-          colour is not available to every viewer. */}
-      <g stroke={ink} strokeWidth="2" strokeLinecap="round" opacity="0.75">
-        <path d={mood === "urgent" ? "M 29 27 L 38 29" : "M 29 27 L 38 26"} />
-        <path d={mood === "urgent" ? "M 55 27 L 46 29" : "M 55 27 L 46 26"} />
+      {/* Brows.
+          The urgent shape raises the INNER ends — the universal concerned
+          face. Lowering them instead, which is what this did first, is the
+          universal angry face: the assistant looked furious at a patient
+          being told they might be having a heart attack. Shape carries the
+          difference so it survives for viewers who cannot use colour. */}
+      <g stroke={ink} strokeWidth="2" strokeLinecap="round" opacity="0.7" fill="none">
+        <path d={mood === "urgent" ? "M 29 28 Q 33.5 25 38 24" : "M 29 27 Q 33.5 25 38 26"} />
+        <path d={mood === "urgent" ? "M 55 28 Q 50.5 25 46 24" : "M 55 27 Q 50.5 25 46 26"} />
       </g>
 
       {/* Eyes, with an occasional blink. Without it the face reads as a
@@ -255,13 +258,16 @@ export default function DoctorAvatar({
       aria-live={mood === "urgent" ? "assertive" : "polite"}
       className={`overflow-hidden rounded-2xl border p-4 transition-shadow ${
         mood === "urgent"
-          ? "border-danger-border bg-danger-surface shadow-md"
+          ? "border-danger-border bg-surface shadow-md"
           : "border-line bg-surface"
       } ${speaking ? "ring-1 ring-brand-300" : ""}`}
       style={{
         // Tokens the SVG reads, so the face follows the surrounding theme
         // rather than carrying hardcoded colours that break in dark mode.
-        ["--sp-avatar-urgent" as string]: "var(--color-danger-text, #b3261e)",
+        // A muted clinical red, not the alert red used for errors. The face
+        // should read as "this is serious" without looking like a warning
+        // dialog, which is what the full danger colour did.
+        ["--sp-avatar-urgent" as string]: "var(--color-danger-text, #a4453a)",
         ["--sp-avatar-calm" as string]: "var(--color-brand-700, #0e7c86)",
       }}
     >

@@ -17,6 +17,7 @@ import {
   formatDateTime,
   formatTime,
 } from "../../components/ui";
+import MessagePatient from "./MessagePatient";
 import { api, errorMessage } from "../../lib/api";
 import { chartColors } from "../../styles/theme";
 
@@ -526,6 +527,17 @@ export function PatientDetail() {
             ))}
           </div>
         </Card>
+      )}
+
+      {/* Anything the doctor writes here is read aloud to the patient
+          verbatim, which is why it sits with the record rather than in a
+          separate messaging screen — the context they are replying to is on
+          this page. */}
+      {patientId && (
+        <MessagePatient
+          patientUserId={patientId}
+          patientName={data.patient?.name}
+        />
       )}
     </div>
   );
