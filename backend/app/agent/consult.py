@@ -40,19 +40,44 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.clinical import hypothesis
+from app.clinical.lexicon import concept_label, extract_concepts
 from app.models.enums import UrgencyLevel
 from app.services import llm, navigation
 from app.services import red_flag_engine as rfe
 
 logger = logging.getLogger(__name__)
 
-# After this many questions, answer with what we have. A chat that keeps
+# The hard ceiling on questions, whatever else is true. A chat that keeps
 # interrogating is worse than one that commits to a careful, caveated view —
 # patients abandon it and get nothing.
-MAX_QUESTIONS = 4
+#
+# Raised from 4 to 6 when questioning became hypothesis-driven. The old cap
+# was safe to keep low precisely because the questions were generic and the
+# evaluation harness showed they changed no outcome: the rule engine reached
+# the same urgency with the opening message alone on all 105 vignettes. A
+# question aimed at a specific rule that is one concept from firing can change
+# the outcome, so it is worth a slightly longer conversation — but only
+# slightly, and never unbounded.
+QUESTION_CAP = 6
+
+# The cap that applies once there is no live hypothesis left and questioning
+# has fallen back to generic history taking. Raising the ceiling to 6 was
+# meant to buy room to chase a rule; instead it also lengthened every ordinary
+# conversation, because the generic path simply ran to the new limit. A sore
+# throat was being asked six questions where four had done before, for
+# identical output. The extra headroom is only earned while a rule is actually
+# being chased.
+GENERIC_QUESTION_CAP = 4
+
+# Kept as an alias: `status()` publishes it and tests assert on the reported
+# configuration.
+MAX_QUESTIONS = QUESTION_CAP
 
 # Below this many filled slots we should still be asking, unless the patient
-# has told us to get on with it.
+# has told us to get on with it. Only consulted when no hypothesis is live —
+# once questioning is driven by the rules, generic slot coverage is the
+# fallback stopping condition rather than the primary one.
 MIN_SLOTS_FOR_ASSESSMENT = 3
 
 
@@ -155,6 +180,30 @@ class ConsultState:
     def coverage(self) -> float:
         return round(len(self.filled) / len(_SLOTS), 2)
 
+    # Concepts settled by answering a question rather than by volunteering the
+    # words. Asked "does the pain spread to your arm?", a patient replies
+    # "yes" — which contains no clinical term at all, so concept extraction
+    # over the transcript finds nothing and the rule the question was chasing
+    # never fires. Without these two sets, hypothesis-driven questioning can
+    # ask a perfect question and then discard the answer.
+    confirmed_concepts: set[str] = field(default_factory=set)
+    denied_concepts: set[str] = field(default_factory=set)
+
+    @property
+    def asked_concepts(self) -> set[str]:
+        """Concepts already probed by a hypothesis question.
+
+        Derived from `asked` rather than stored separately, for the same
+        reason the rest of the state is derived from the transcript: a
+        resumed conversation must reconstruct identically, and a second
+        source of truth is a second thing to drift.
+        """
+        return {
+            entry.split("concept:", 1)[1]
+            for entry in self.asked
+            if entry.startswith("concept:")
+        }
+
 
 @dataclass
 class ConsultTurn:
@@ -186,6 +235,21 @@ _BARE_NEGATIVE = re.compile(
     r"nah|no there'?s? (?:no|none)|i don'?t think so)\b[\s.!]*$", re.I)
 _BARE_AFFIRMATIVE = re.compile(r"^\s*(yes|yeah|yep|correct|that'?s right)\b[\s.!]*$", re.I)
 
+# A "yes" that carries detail — "yes, it goes into my left arm". Still a
+# confirmation of whatever was asked, even when the elaboration contains no
+# surface form the lexicon happens to know.
+_LEADING_AFFIRMATIVE = re.compile(r"^\s*(yes|yeah|yep|correct|it does|i do|i have)\b", re.I)
+
+# The mirror image: "no, my breathing is fine". A denial that carries detail is
+# still a denial, and recording it retires the rule that prompted the question
+# instead of leaving it live and re-askable.
+_LEADING_NEGATIVE = re.compile(r"^\s*(no|nope|nah|not really|none|it does ?n'?t|i have ?n'?t)\b", re.I)
+
+
+def _normalise_question(text: str) -> str:
+    """Compare question wording ignoring case, punctuation and spacing."""
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
 
 def _slot_of_question(question: str) -> str | None:
     """Which history topic an assistant question was probing.
@@ -199,6 +263,40 @@ def _slot_of_question(question: str) -> str | None:
         if slot.detector.search(text):
             return slot.key
     return None
+
+
+# Reverse index from curated question text back to the concept it probes.
+# Needed because the questions are deliberately natural: "Does the pain spread
+# anywhere — into your arm, jaw, neck or back?" contains none of the lexicon's
+# surface forms for `radiating_pain` (which are "pain spreads", "radiating",
+# "pain in left arm"), so extracting concepts from the question text alone
+# silently fails and the assistant re-asks the same question forever.
+_QUESTION_TO_CONCEPT: dict[str, str] = {
+    _normalise_question(text): concept
+    for concept, text in hypothesis.CONCEPT_PHRASING.items()
+}
+
+
+def _concept_of_question(question: str) -> str | None:
+    """Which clinical concept an assistant question was probing.
+
+    Curated wording is matched exactly through a reverse index. Model-phrased
+    questions fall back to concept extraction, which is imprecise but is only
+    reached when the model did the wording. In the running application the
+    authoritative record is the turn's own `slot`, carried through
+    `memory_asked`; this is the reconstruction path for a resumed conversation,
+    where that memory is gone but the transcript remains.
+    """
+    if not question:
+        return None
+
+    direct = _QUESTION_TO_CONCEPT.get(_normalise_question(question))
+    if direct:
+        return direct
+
+    asserted, negated = extract_concepts(question)
+    both = asserted | negated
+    return sorted(both)[0] if both else None
 
 
 def build_state(messages: list[dict], *, memory_asked: list[str] | None = None) -> ConsultState:
@@ -217,18 +315,60 @@ def build_state(messages: list[dict], *, memory_asked: list[str] | None = None) 
     # and a resumed conversation must not start re-asking questions the
     # patient can plainly see it already asked.
     asked = list(memory_asked or [])
+    confirmed: set[str] = set()
+    denied: set[str] = set()
+
     for message in assistant_turns:
         slot = _slot_of_question(message)
         if slot and slot not in asked:
             asked.append(slot)
+        # A hypothesis question is aimed at a concept, not a history slot, so
+        # none of the six slot detectors match it. Without this the assistant
+        # forgets it already asked "does the pain spread to your arm?" the
+        # moment a conversation is resumed, and asks it again — invisible in a
+        # fresh chat, obvious and alarming to a patient coming back to one.
+        concept = _concept_of_question(message)
+        if concept and f"concept:{concept}" not in asked:
+            asked.append(f"concept:{concept}")
+
+    # Pair each question with the reply it actually got, so a yes/no answer
+    # settles the concept that was asked about.
+    for index, message in enumerate(messages):
+        if message.get("role") != "assistant":
+            continue
+        concept = _concept_of_question(message.get("content", ""))
+        if not concept:
+            continue
+        reply = next(
+            (m.get("content", "") for m in messages[index + 1:] if m.get("role") == "user"),
+            "",
+        )
+        if not reply:
+            continue
+        if _BARE_AFFIRMATIVE.match(reply) or _LEADING_AFFIRMATIVE.match(reply):
+            confirmed.add(concept)
+        elif _BARE_NEGATIVE.match(reply) or _LEADING_NEGATIVE.match(reply):
+            denied.add(concept)
 
     state = ConsultState(
         chief_complaint=patient_turns[0].strip() if patient_turns else "",
         transcript=transcript,
         asked=asked,
-        # Only assistant turns that actually ended in a question count.
-        questions_asked=sum(1 for t in assistant_turns if t.rstrip().endswith("?")),
+        # Only assistant turns that actually asked something count. The "?"
+        # test alone let the cap be exceeded: a model-phrased question without
+        # a question mark was invisible here, so a conversation capped at six
+        # ran to seven. Curated questions are recognised by exact wording,
+        # which cannot false-positive on a merged assistant answer the way
+        # loose concept matching would.
+        questions_asked=sum(
+            1
+            for t in assistant_turns
+            if t.rstrip().endswith("?")
+            or _normalise_question(t) in _QUESTION_TO_CONCEPT
+        ),
         impatient=bool(patient_turns and _IMPATIENT.search(patient_turns[-1])),
+        confirmed_concepts=confirmed,
+        denied_concepts=denied,
     )
 
     for slot in _SLOTS:
@@ -295,7 +435,18 @@ def run(
         pregnancy_week=patient_context.get("pregnancy_week"),
         chronic_conditions=patient_context.get("chronic_conditions") or [],
     )
-    red_flags = rfe.assess_text(state.transcript, context)
+    # Concepts from the patient's own words, plus the ones settled by their
+    # answers to direct questions. A "yes" to "does the pain spread to your
+    # arm?" is exactly the evidence the rule was asking for, and it must reach
+    # the engine as `radiating_pain` or the question was pointless.
+    asserted, negated = extract_concepts(state.transcript)
+    asserted |= state.confirmed_concepts
+    negated |= state.denied_concepts
+    # An assertion outranks a denial, matching the lexicon's own precedence.
+    negated -= asserted
+
+    red_flags = rfe.assess_concepts(asserted, context)
+    red_flags.negated_concepts = negated
     recommendation = navigation.navigate(
         red_flags=red_flags, chief_complaint=state.chief_complaint
     )
@@ -323,23 +474,46 @@ def run(
             red_flags=red_flag_payload,
         )
 
-    # 3. Still gathering?
+    # 3. Is a red-flag rule close enough to firing to be worth chasing?
+    #    Anything already asked about is excluded, so a denied concept is
+    #    never put to the patient twice.
+    hypothesis_target, gaps = hypothesis.next_target(
+        asserted=red_flags.concepts,
+        negated=red_flags.negated_concepts,
+        context=context,
+        already_asked=state.asked_concepts,
+    )
+
+    # 4. Still gathering?
+    #
+    #    A live hypothesis keeps the conversation going up to the hard cap;
+    #    with none, the original generic-slot stopping rule applies. The
+    #    ordering matters: `impatient` and the cap are checked first so that
+    #    chasing a rule can never override the patient asking us to stop.
     enough = (
-        len(state.filled) >= MIN_SLOTS_FOR_ASSESSMENT
-        or state.questions_asked >= MAX_QUESTIONS
-        or state.impatient
-        or not state.missing
+        state.impatient
+        or state.questions_asked >= QUESTION_CAP
+        or (
+            hypothesis_target is None
+            and (
+                state.questions_asked >= GENERIC_QUESTION_CAP
+                or len(state.filled) >= MIN_SLOTS_FOR_ASSESSMENT
+                or not state.missing
+            )
+        )
     )
 
     if not enough:
-        turn = _ask(state, patient_context, language)
+        turn = _ask(
+            state, patient_context, language, hypothesis_target=hypothesis_target
+        )
         turn.urgency = str(red_flags.urgency)
         turn.coverage = state.coverage
         turn.red_flags = red_flag_payload
         turn.latency_ms = int((time.perf_counter() - started) * 1000)
         return turn
 
-    # 4. Assess.
+    # 5. Assess.
     turn = _assess(state, patient_context, red_flags, recommendation, language)
     turn.coverage = state.coverage
     turn.red_flags = red_flag_payload
@@ -366,8 +540,78 @@ Rules:
 - Output the question only. No preamble, no quotes."""
 
 
-def _ask(state: ConsultState, patient_context: dict, language: str) -> ConsultTurn:
-    """Choose and phrase the next history question."""
+def _ask(
+    state: ConsultState,
+    patient_context: dict,
+    language: str,
+    *,
+    hypothesis_target: str | None = None,
+) -> ConsultTurn:
+    """Choose and phrase the next history question.
+
+    With a `hypothesis_target` the question chases a specific red-flag rule
+    that is one concept from firing; without one it falls back to the original
+    behaviour of walking the six generic history slots in order.
+    """
+    if hypothesis_target:
+        return _ask_hypothesis(state, patient_context, language, hypothesis_target)
+    return _ask_slot(state, patient_context, language)
+
+
+def _ask_hypothesis(
+    state: ConsultState, patient_context: dict, language: str, concept: str
+) -> ConsultTurn:
+    """Ask about one concept, chosen because it would settle a live hypothesis.
+
+    Curated wording is preferred: it is precise, costs nothing and cannot
+    drift. It is skipped when the person answering is not the patient — the
+    curated text is written in the second person, and "are you finding it hard
+    to breathe?" is the wrong question to put to the parent of a one-year-old.
+    In that case the model phrases it, because the prompt carries the age.
+    """
+    age = patient_context.get("age")
+    answering_for_self = age is None or age >= hypothesis._SELF_REPORT_MIN_AGE
+
+    question = ""
+    source = "deterministic"
+
+    if answering_for_self:
+        question = hypothesis.question_for(concept) or ""
+
+    if not question:
+        language_name = {"en": "English", "si": "Sinhala", "ta": "Tamil"}.get(
+            language, "English"
+        )
+        prompt = f"""Patient's words so far:
+\"\"\"{state.transcript[:1500]}\"\"\"
+
+Background: {_context_line(patient_context)}
+
+Ask specifically about: {concept_label(concept)}.
+Ask your one question in {language_name}."""
+        completion = llm.complete(
+            prompt, system=_ASK_SYSTEM, temperature=0.4, max_tokens=90, fast=True
+        )
+        question = _clean_question(completion.text) if completion else ""
+        source = completion.provider if completion else "deterministic"
+
+    if not question:
+        question = f"Do you have {concept_label(concept).lower()}?"
+        source = "deterministic"
+
+    return ConsultTurn(
+        mode="ask",
+        answer=question,
+        question=question,
+        # Namespaced so `build_state` can tell a concept probe from a history
+        # slot when the conversation is replayed.
+        slot=f"concept:{concept}",
+        source=source,
+    )
+
+
+def _ask_slot(state: ConsultState, patient_context: dict, language: str) -> ConsultTurn:
+    """The original generic-history question, used when no hypothesis is live."""
     candidates = [s for s in state.missing if s.key not in state.asked] or state.missing
     target = candidates[0]
 
@@ -380,7 +624,7 @@ def _ask(state: ConsultState, patient_context: dict, language: str) -> ConsultTu
 Background: {_context_line(patient_context)}
 Already covered: {known}
 Still unknown: {", ".join(s.label for s in state.missing)}
-Question number {state.questions_asked + 1} of at most {MAX_QUESTIONS}.
+Question number {state.questions_asked + 1} of at most {QUESTION_CAP}.
 
 The area most worth asking about next is: {target.label}.
 Ask your one question in {language_name}."""
@@ -657,8 +901,15 @@ def _assessment_markdown(
 def status() -> dict:
     return {
         "slots": [s.key for s in _SLOTS],
-        "max_questions": MAX_QUESTIONS,
+        "max_questions": QUESTION_CAP,
         "min_slots_for_assessment": MIN_SLOTS_FOR_ASSESSMENT,
         "urgency_authority": "deterministic_red_flag_engine",
         "escalation_short_circuits_questions": True,
+        # How the next question is chosen. Published because "why did it ask
+        # me that?" is a fair question to be able to answer about a medical
+        # assistant, and because the previous answer — "it walks a fixed list"
+        # — did not match what the module documentation claimed.
+        "question_selection": "red_flag_hypothesis_then_generic_slots",
+        "hypothesis_rules": len(hypothesis.RULES),
+        "curated_concept_questions": len(hypothesis.CONCEPT_PHRASING),
     }
