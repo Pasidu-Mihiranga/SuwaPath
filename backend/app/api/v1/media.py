@@ -210,6 +210,15 @@ def upload_document(
     document.processing_status = ProcessingStatus.COMPLETED
     document.document_type = result.document_type
 
+    # A document that is not a report produces no recommendation and no
+    # notification. Everything below turns a finding into care navigation, and
+    # there is no finding here — routing a patient to a specialty on the
+    # strength of a file that was never a medical report is a recommendation
+    # with nothing behind it.
+    if result.not_a_report_reason:
+        db.commit()
+        return _document_dict(db, document, report, None)
+
     # Feed the finding into shared care navigation (internal rule 5).
     has_critical = any(v.flag == ResultFlag.CRITICAL for v in result.values)
     urgency = UrgencyLevel.URGENT if has_critical else (
