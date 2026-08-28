@@ -347,6 +347,12 @@ def complete(
             tool_calls=tool_calls or [],
         )
 
+    if not settings.allow_rule_based_fallback:
+        errors = "; ".join(f"{a['provider']}: {a.get('error')}" for a in attempts if a.get("error"))
+        raise RuntimeError(
+            f"All AI LLM providers failed and ALLOW_RULE_BASED_FALLBACK is disabled. Provider errors: {errors or 'No healthy provider configured'}"
+        )
+
     return Completion(
         text="",
         provider="none",

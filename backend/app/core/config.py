@@ -77,6 +77,12 @@ class Settings(BaseSettings):
 
     tavily_api_key: str | None = None
 
+    # When True (default), the system falls back to deterministic rule-based
+    # composers if LLM providers fail or are unconfigured.
+    # When False, LLM failures will raise explicit errors rather than silently
+    # falling back to canned rule-based text.
+    allow_rule_based_fallback: bool = True
+
     # --- Knowledge retrieval ---
     qdrant_url: str | None = None  # when unset, a local on-disk Qdrant is used
     qdrant_path: Path = BACKEND_ROOT / "storage" / "qdrant"
