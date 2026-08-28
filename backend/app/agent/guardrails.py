@@ -222,9 +222,9 @@ def check_input(text: str) -> GuardResult:
 # Phrases that assert certainty SuwaPath is never entitled to.
 _OVERCONFIDENT_PATTERNS = [
     ("definitive_diagnosis", re.compile(
-        r"\byou (definitely |certainly )?have\b(?!\s+(an?\s+)?appointment)", re.I)),
-    ("rules_out", re.compile(r"\b(this|it)\s+(rules?\s+out|is\s+not)\s+\w+", re.I)),
-    ("guarantee", re.compile(r"\b(guaranteed|100%\s+(sure|certain)|no\s+need\s+to\s+worry)\b", re.I)),
+        r"\byou (definitely|certainly|undoubtedly|clearly)\s+(have|suffer\s+from|are\s+diagnosed\s+with)\b", re.I)),
+    ("rules_out", re.compile(r"\b(this|it)\s+(definitely\s+rules?\s+out|completely\s+rules?\s+out)\b", re.I)),
+    ("guarantee", re.compile(r"\b(guaranteed|100%\s+(sure|certain)|there\s+is\s+no\s+need\s+to\s+worry)\b", re.I)),
     ("dismissive", re.compile(r"\b(nothing\s+to\s+worry\s+about|perfectly\s+fine)\b", re.I)),
 ]
 

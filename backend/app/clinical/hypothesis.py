@@ -217,6 +217,9 @@ def is_engaged(rule: RedFlagRule, asserted: set[str], context: Context) -> bool:
     patient mentions something relevant; it just does not get to choose the
     questions.
     """
+    if not asserted:
+        return False
+
     return (
         _mentions(rule, asserted)
         or _defines_this_patient(rule, context)
