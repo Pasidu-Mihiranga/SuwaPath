@@ -192,10 +192,16 @@ def route_node(state: AgentState) -> dict:
         source = "keyword_fallback"
         routes = _fallback_routes(message)
 
-    mid_consultation = bool(history) and _awaiting_answer(history)
+    is_meta_or_direct = bool(re.search(
+        r"^(hi|hello|hey|what (can|do|type)|who are you|tell me about|what is suwa|how (can|do) you help|need your detail|your details|thank you|thanks|bye)\b",
+        message.strip(),
+        re.I
+    )) or (any(r["route"] == "direct" for r in routes) and not any(r["route"] == "consult" for r in routes))
 
-    # A reply to our own follow-up question always continues the consultation,
-    # whatever the classifier made of the fragment on its own.
+    mid_consultation = bool(history) and _awaiting_answer(history) and not is_meta_or_direct
+
+    # A reply to our own follow-up question continues the consultation only if
+    # the user is actually answering, not changing topic to a meta or direct query.
     if mid_consultation and not any(r["route"] == "consult" for r in routes):
         routes.insert(0, {
             "route": "consult",
