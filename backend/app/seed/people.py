@@ -301,6 +301,22 @@ def seed_patients(
             "language": Language.SI,
         },
         {
+            # The postpartum pathway had no demo account at all: the maternal
+            # persona is 28 weeks pregnant, so nothing showed a newborn, the
+            # postpartum danger-sign rules, or the guardian view of a mother
+            # and baby together. Those rules are among the most serious in the
+            # engine and were the least demonstrable.
+            "key": "postpartum",
+            "email": "postpartum@suwapath.lk",
+            "name": "Ishara Jayawardena",
+            "sex": Sex.FEMALE,
+            "dob": date(1996, 11, 2),
+            "city": "Colombo",
+            "chronic": [],
+            "allergies": [],
+            "language": Language.SI,
+        },
+        {
             "key": "elderly",
             "email": "elderly@suwapath.lk",
             "name": "Sunil Fernando",
@@ -345,9 +361,19 @@ def seed_patients(
             current_medications=[],
             is_pregnant=spec["key"] == "maternal",
             expected_delivery_date=(
-                date.today() + timedelta(weeks=12) if spec["key"] == "maternal" else None
+                date.today() + timedelta(weeks=12) if spec["key"] == "maternal"
+                # Already delivered: the date is in the past, which is what
+                # makes the postpartum rules apply rather than the antenatal
+                # ones.
+                else date.today() - timedelta(days=24) if spec["key"] == "postpartum"
+                else None
             ),
-            emergency_contact_name="Nimal Fernando",
+            # The Fernandos share a guardian; the postpartum persona is not
+            # one of them, and naming him as her emergency contact would put a
+            # stranger's name on her record.
+            emergency_contact_name=(
+                "Ruwan Jayawardena" if spec["key"] == "postpartum" else "Nimal Fernando"
+            ),
             emergency_contact_phone=make_phone(),
             accessibility_large_text=is_elderly,
         )

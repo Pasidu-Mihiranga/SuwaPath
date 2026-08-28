@@ -38,6 +38,7 @@ from datetime import date, timedelta
 
 import httpx
 
+from app.api.v1.symptoms import MAX_TURNS
 from app.core.config import settings
 
 DEFAULT_BASE = "http://127.0.0.1:8000"
@@ -76,6 +77,20 @@ JOURNEYS: dict[str, dict] = {
             "My blood pressure was 138 over 88 at the clinic last week",
         ],
         "report": "thyroid_profile.pdf",
+        "image": None,
+    },
+    # Three weeks after delivery. The turns walk deliberately close to the
+    # postpartum danger signs — heavy bleeding, fever, breast pain — without
+    # meeting any of them, so the account demonstrates the postpartum pathway
+    # rather than parking permanently on an escalation banner.
+    "postpartum@suwapath.lk": {
+        "symptoms": [
+            "I gave birth three weeks ago and my breast is sore and hard on one side",
+            "There is no fever and the bleeding has almost stopped",
+            "Feeding hurts on that side so the baby feeds less from it",
+            "The baby is feeding well otherwise and gaining weight",
+        ],
+        "report": "cbc_report.pdf",
         "image": None,
     },
     "elderly@suwapath.lk": {
@@ -118,12 +133,22 @@ def run_symptom_check(client: httpx.Client, headers: dict, turns: list[str]) -> 
     questions. The engine decides when it has enough, so the loop stops on
     `is_complete` rather than sending every scripted line.
     """
-    # The history-taking loop asks up to four questions before it assesses.
-    # Scripted answers cover the clinically meaningful ones; the fillers stop
-    # the session stalling one question short of a conclusion, which is what
-    # happened on the first run — a report-derived recommendation appeared but
-    # no symptom-derived one did.
-    opening, *replies = [*turns, "No other symptoms", "Nothing else to add"]
+    # `/symptoms` runs the legacy six-slot engine (`MAX_TURNS` in
+    # `app/api/v1/symptoms.py`), not the agent's hypothesis loop, so it can ask
+    # six questions before it assesses. The scripted turns answer the
+    # clinically meaningful ones and the fillers cover the rest: with too few,
+    # the session ends one question short of a conclusion and the account gets
+    # a report-derived recommendation but no symptom-derived one — which is
+    # exactly the silent half-populated state this script exists to prevent.
+    # Padded from MAX_TURNS rather than a fixed count so raising the engine's
+    # limit cannot quietly reintroduce that.
+    fillers = [
+        "No other symptoms",
+        "Nothing else to add",
+        "No, nothing like that",
+        "That is everything I can think of",
+    ]
+    opening, *replies = [*turns, *fillers][: MAX_TURNS + 1]
     response = client.post(
         "/symptoms/sessions",
         json={"language": "en", "initial_message": opening},
@@ -154,7 +179,17 @@ def run_symptom_check(client: httpx.Client, headers: dict, turns: list[str]) -> 
             return False
         result = turn.json()
 
-    return bool(result.get("recommendation") or result.get("is_complete"))
+    if not (result.get("recommendation") or result.get("is_complete")):
+        # Reported rather than swallowed: the caller only logs what succeeded,
+        # so a silent False here looks identical to a journey that had no
+        # symptom check to run.
+        log(
+            f"symptom session {session_id} ran out of scripted answers before "
+            f"the engine concluded — the account will have no symptom-derived "
+            f"recommendation."
+        )
+        return False
+    return True
 
 
 def enrol_programme(client: httpx.Client, headers: dict, spec: dict) -> str | None:
