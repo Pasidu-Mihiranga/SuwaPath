@@ -136,6 +136,10 @@ class ExtractionResult:
     patient_name: str | None = None
     collection_date: str | None = None
     document_type: DocumentType = DocumentType.LAB_REPORT
+    # Set when the document was read successfully but does not look like a
+    # report with results in it, so the UI can say that rather than showing an
+    # empty table under a confident-looking heading.
+    not_a_report_reason: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -275,11 +279,32 @@ def _parse_line(line: str, row_index: int) -> ParsedValue | None:
     result_numeric = _to_float(result_text)
     analyte = _match_analyte(name)
 
-    # Reject document metadata ("Sample No : LC-2026-88214", "Age / Sex : 32").
-    # A genuine analyte row carries at least one of: a printed reference range,
-    # a recognised unit, or a name matching the analyte catalogue.
+    # Reject document metadata ("Sample No : LC-2026-88214", "Age / Sex : 32")
+    # and, more importantly, prose that merely contains numbers.
+    #
+    # A printed numeric range used to be sufficient on its own. It is not: any
+    # document saying "Scale 1-5" or "rate this 1 to 10" produces a range, and
+    # a Google Form uploaded to this endpoint was parsed into two lab results,
+    # one of them flagged CRITICAL, because a survey's Likert scale looked
+    # exactly like a reference interval. Nothing else about the line had to
+    # resemble a lab result.
+    #
+    # So a row must now carry evidence that it *is* a measurement: a
+    # recognised unit, or a name matching the analyte catalogue. A bare range
+    # is no longer enough. Measured across the bundled reports, digital and
+    # scanned alike, every genuine row carries both.
+    # A row is a measurement if the catalogue recognises it, or it carries a
+    # unit, or its label reads like an analyte name *and* the report printed a
+    # range beside it. That last clause is what keeps document metadata out:
+    # "Age / Sex : 32" and "Collected On : 14/07/2026" have short, plausible
+    # labels but no reference range, and were being listed as test results the
+    # moment the name check alone was trusted.
     has_printed_range = ref_low is not None or ref_high is not None
-    if not (has_printed_range or unit or analyte):
+    if not (
+        analyte
+        or unit
+        or (has_printed_range and _looks_like_analyte_name(name))
+    ):
         return None
 
     # The range printed on the report always wins (spec §11).
@@ -304,6 +329,62 @@ def _parse_line(line: str, row_index: int) -> ParsedValue | None:
         flag=_flag_value(result_numeric, ref_low, ref_high),
         row_index=row_index,
     )
+
+
+# An analyte name is a short noun phrase; prose is not. Measured over the
+# analytes in the bundled reports and the catalogue, the longest name is 25
+# characters and 3 words ("Absolute Neutrophil Count"). The prose fragments
+# that were being parsed as results start at 47 characters and 8 words. These
+# bounds sit in the gap, with headroom on both sides.
+MAX_ANALYTE_NAME_CHARS = 40
+MAX_ANALYTE_NAME_WORDS = 5
+
+
+def _looks_like_analyte_name(name: str) -> bool:
+    """Whether a row label could plausibly be the name of a measurement.
+
+    This exists because units cannot be relied on. `_parse_inline` does not
+    extract a trailing "%" as a unit, and the analyte catalogue holds 22
+    entries against a world of far more tests — so requiring a unit or a
+    catalogue match would silently drop real results such as an out-of-range
+    haematocrit. Dropping a genuine abnormal value is the more dangerous
+    failure of the two, so the name itself is judged instead.
+    """
+    if len(name) > MAX_ANALYTE_NAME_CHARS:
+        return False
+    if len(name.split()) > MAX_ANALYTE_NAME_WORDS:
+        return False
+    # Sentence punctuation: a label does not contain an equals sign, a quoted
+    # phrase, or a full stop followed by more words.
+    return not any(mark in name for mark in ("=", '"', "\u201c", "\u201d", ". "))
+
+
+# Vocabulary that a report carrying laboratory results essentially always
+# contains somewhere, and that ordinary documents do not.
+_LAB_VOCABULARY = (
+    "reference range", "reference interval", "normal range", "specimen",
+    "laboratory", "collected on", "sample no", "haematology", "hematology",
+    "biochemistry", "pathology", "lab no", "investigation",
+)
+
+
+def looks_like_lab_report(text: str, values: list[ParsedValue]) -> bool:
+    """Whether the document as a whole is a report with results in it.
+
+    The row checks judge lines in isolation, and a line can look like a
+    measurement inside a document that is nothing of the kind — "Overall
+    rating  4  1-5" in a feedback form parses as cleanly as a real result. So
+    the document must also carry evidence of being a report: at least one row
+    matching the analyte catalogue, or the vocabulary a laboratory uses.
+
+    Measured on the bundled samples, digital and scanned alike, every real
+    report satisfies both conditions and the Google Form that prompted this
+    satisfies neither.
+    """
+    if any(v.normalised_name for v in values):
+        return True
+    lowered = (text or "").lower()
+    return any(word in lowered for word in _LAB_VOCABULARY)
 
 
 # Parsed row: (name, result_text, unit, reference_text, ref_low, ref_high)
@@ -510,6 +591,28 @@ def extract_document(path: Path, mime_type: str) -> ExtractionResult:
     values, tables = parse_values(text)
     metadata = extract_metadata(text)
 
+    # Read fine, but it is not a report. Presenting rows parsed out of an
+    # arbitrary document as clinical results — complete with reference ranges
+    # and a CRITICAL flag — is worse than presenting nothing, so the values
+    # are discarded and the reason is carried through to the UI.
+    # Checked even when nothing parsed, so that "this is not a report" and
+    # "this is a report we could not read" stay distinguishable. A genuine
+    # report from a bad scan still carries laboratory vocabulary, so it falls
+    # through to the second message rather than being called a non-report.
+    not_a_report_reason = None
+    if not looks_like_lab_report(text, values):
+        if values:
+            logger.info(
+                "Discarding %d parsed row(s): %s does not look like a lab report.",
+                len(values), path.name,
+            )
+            values, tables = [], []
+        not_a_report_reason = (
+            "This document was read successfully, but it does not look like a "
+            "laboratory or clinical report, so no results were extracted from "
+            "it."
+        )
+
     return ExtractionResult(
         engine=engine,
         raw_text=text,
@@ -522,6 +625,7 @@ def extract_document(path: Path, mime_type: str) -> ExtractionResult:
         patient_name=metadata["patient_name"],
         collection_date=metadata["collection_date"],
         document_type=classify_document(text),
+        not_a_report_reason=not_a_report_reason,
     )
 
 
@@ -552,9 +656,23 @@ def summarise(result: ExtractionResult) -> dict:
     ]
 
     specialty = _suggest_specialty(abnormal)
-    explanation = _build_explanation(abnormal, normal_count, len(result.values))
+    explanation = (
+        result.not_a_report_reason
+        or _build_explanation(abnormal, normal_count, len(result.values))
+    )
 
-    if abnormal:
+    if result.not_a_report_reason:
+        # No specialty either: routing someone to a clinician on the strength
+        # of a document that was never a report is a recommendation with
+        # nothing behind it.
+        specialty = None
+        next_step = (
+            "Upload the lab report, prescription or radiology report itself "
+            "and it will be read and explained. If this is a medical document "
+            "in a format that could not be read, your doctor can review the "
+            "original."
+        )
+    elif abnormal:
         next_step = (
             f"Discuss these results with a doctor. Based on which values are "
             f"outside the range shown on your report, a consultation in "
@@ -580,6 +698,10 @@ def summarise(result: ExtractionResult) -> dict:
 def _build_summary(
     result: ExtractionResult, abnormal: list[ParsedValue], normal_count: int
 ) -> str:
+    if result.not_a_report_reason:
+        # No title: it would be a line of prose lifted out of whatever the
+        # document actually is, presented as if it were a report heading.
+        return "No laboratory results were found in this document."
     title = result.report_title or "Medical report"
     parts = [f"{title}: {len(result.values)} result(s) detected."]
     if abnormal:
