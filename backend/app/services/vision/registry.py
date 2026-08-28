@@ -12,7 +12,12 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.models.enums import ImageModality
-from app.services.vision.base import InferenceResult, ModelAdapter, load_grayscale
+from app.services.vision.base import (
+    InferenceResult,
+    ModelAdapter,
+    load_grayscale,
+    load_rgb,
+)
 from app.services.vision.pneumonia import (
     BaselinePneumoniaAdapter,
     OnnxPneumoniaAdapter,
@@ -140,8 +145,15 @@ def screen_image(
     else:
         adapter = get_adapter(modality)
     image = load_grayscale(Path(image_path))
+    # Loaded separately and only for validation: inference runs on grayscale,
+    # but the check for "this is not a radiograph at all" needs the colour
+    # that grayscale conversion throws away.
+    try:
+        rgb = load_rgb(Path(image_path))
+    except Exception:  # noqa: BLE001 - a colour view is a bonus, never required
+        rgb = None
 
-    validation = adapter.validate(image)
+    validation = adapter.validate(image, rgb=rgb)
     if not validation.passed:
         raise ImageValidationError(
             validation.notes or "The uploaded image failed modality validation."

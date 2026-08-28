@@ -79,8 +79,15 @@ class ModelAdapter(ABC):
         """True when this adapter can actually run inference."""
 
     @abstractmethod
-    def validate(self, image: np.ndarray) -> ValidationResult:
-        """Check the image is plausibly the expected modality."""
+    def validate(
+        self, image: np.ndarray, *, rgb: np.ndarray | None = None
+    ) -> ValidationResult:
+        """Check the image is plausibly the expected modality.
+
+        `rgb` is the same image before grayscale conversion. Optional so that
+        callers holding only a grayscale array (tests, offline tools) still
+        work; when it is supplied the colour checks are applied as well.
+        """
 
     @abstractmethod
     def predict(self, image: np.ndarray, *, heatmap_path: Path | None = None) -> InferenceResult:
@@ -119,6 +126,22 @@ def load_grayscale(path: Path, size: int | None = None) -> np.ndarray:
         if size:
             image = image.resize((size, size), Image.BILINEAR)
         return np.asarray(image, dtype=np.float32) / 255.0
+
+
+def load_rgb(path: Path) -> np.ndarray:
+    """Load an image as a float32 HxWx3 array scaled to [0, 1].
+
+    Inference runs on grayscale, but *validation* must not: a radiograph is
+    monochrome and an illustration, screenshot or photo generally is not, so
+    colour is the single strongest signal for "this is not a radiograph". It
+    was previously discarded by `convert("L")` before any check could see it,
+    which is how a full-colour marketing illustration reached the classifier
+    and came back with a confident finding.
+    """
+    from PIL import Image
+
+    with Image.open(path) as handle:
+        return np.asarray(handle.convert("RGB"), dtype=np.float32) / 255.0
 
 
 def write_heatmap(

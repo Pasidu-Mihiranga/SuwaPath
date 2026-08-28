@@ -88,11 +88,65 @@ def boundary_confidence(probability: float, threshold: float) -> float:
     return 0.5 + 0.5 * min((threshold - probability) / span, 1.0)
 
 
-def _validate_chest_xray(image: np.ndarray) -> ValidationResult:
+def _residual_saturation(rgb: np.ndarray) -> float:
+    """How colourful an image is *after* removing a global colour cast.
+
+    Raw saturation cannot be used directly. A phone photograph of a film under
+    tungsten or fluorescent light picks up a cast that reads as saturation
+    everywhere, and measured on real files that lands at the same level as a
+    genuinely colourful illustration — a threshold on raw saturation would
+    reject the legitimate photo along with the illustration.
+
+    The difference is that a cast is *uniform* while real colour content is
+    *localised*. Dividing each channel by its own mean (grey-world balance)
+    removes the uniform part; what survives is colour that varies across the
+    frame. Measured on the samples in `storage/samples` plus simulated casts:
+
+        real radiograph, no cast                0.000
+        photographed film, mild warm cast       0.049
+        photographed film, fluorescent          0.079
+        photographed film, tungsten             0.119
+        photographed film, extreme cast         0.184
+        full-colour illustration                0.704
+
+    The 98th percentile is used rather than the mean so that a small but
+    strongly coloured region — an annotation, a logo, a UI chrome strip — is
+    enough to disqualify the image.
+    """
+    channel_means = rgb.reshape(-1, 3).mean(axis=0)
+    balance = np.maximum(channel_means / max(float(channel_means.mean()), 1e-6), 1e-6)
+    balanced = np.clip(rgb / balance, 0.0, 1.0)
+    brightest = balanced.max(axis=-1)
+    darkest = balanced.min(axis=-1)
+    saturation = np.where(
+        brightest > 1e-6, (brightest - darkest) / np.maximum(brightest, 1e-6), 0.0
+    )
+    return float(np.percentile(saturation, 98))
+
+
+# Chosen with roughly a factor of two of headroom on both sides: the worst
+# legitimate case measured 0.184 and the illustration that prompted this
+# measured 0.704. A radiograph exported from any imaging system is exactly 0.0.
+MAX_RESIDUAL_SATURATION = 0.35
+
+# Fraction of near-white pixels. Radiographs are collimated and mid-toned;
+# illustrations, screenshots and document scans sit on white. Measured: real
+# radiographs 0.04-0.07, the illustration 0.71, a blank page 0.84. Set well
+# clear of both so a brightly lit photograph of a film is not caught.
+MAX_NEAR_WHITE_FRACTION = 0.45
+
+
+def _validate_chest_xray(
+    image: np.ndarray, rgb: np.ndarray | None = None
+) -> ValidationResult:
     """Reject images that are clearly not chest radiographs.
 
     Deliberately permissive — the goal is catching obvious mistakes (a selfie, a
-    screenshot, a document scan), not performing quality control.
+    screenshot, a document scan), not performing quality control. Permissive is
+    not the same as absent, though: every check here was previously computed on
+    the grayscale array alone, and a full-colour illustration passed all of
+    them and was returned to a patient as a confident screening finding. The
+    colour and near-white checks below are what close that.
     """
     height, width = image.shape
     if min(height, width) < 100:
@@ -123,6 +177,25 @@ def _validate_chest_xray(image: np.ndarray) -> ValidationResult:
         return ValidationResult(
             False,
             "Image looks like a document or screenshot rather than a radiograph.",
+        )
+
+    if float((image > 0.90).mean()) > MAX_NEAR_WHITE_FRACTION:
+        return ValidationResult(
+            False,
+            "Most of this image is white background, which a chest X-ray is "
+            "not. If you photographed a film, crop to the film itself and "
+            "upload it again.",
+        )
+
+    # Last because it is the only check needing the pre-grayscale image, and
+    # the only one that can be skipped: a caller holding just a grayscale
+    # array still gets every check above.
+    if rgb is not None and _residual_saturation(rgb) > MAX_RESIDUAL_SATURATION:
+        return ValidationResult(
+            False,
+            "This image is in colour, and X-rays are not. Please upload the "
+            "X-ray image itself — a photo, illustration or screenshot cannot "
+            "be screened.",
         )
 
     return ValidationResult(True, None)
@@ -396,8 +469,10 @@ class OnnxPneumoniaAdapter(ModelAdapter):
     def is_available(self) -> bool:
         return self._ensure_loaded()
 
-    def validate(self, image: np.ndarray) -> ValidationResult:
-        return _validate_chest_xray(image)
+    def validate(
+        self, image: np.ndarray, *, rgb: np.ndarray | None = None
+    ) -> ValidationResult:
+        return _validate_chest_xray(image, rgb)
 
     def _to_tensor(self, image: np.ndarray) -> np.ndarray:
         """One grayscale image to the layout this graph declared."""
@@ -491,8 +566,10 @@ class BaselinePneumoniaAdapter(ModelAdapter):
     def is_available(self) -> bool:
         return True
 
-    def validate(self, image: np.ndarray) -> ValidationResult:
-        return _validate_chest_xray(image)
+    def validate(
+        self, image: np.ndarray, *, rgb: np.ndarray | None = None
+    ) -> ValidationResult:
+        return _validate_chest_xray(image, rgb)
 
     def _score(self, image: np.ndarray) -> float:
         """Score consolidation-like opacity from real image statistics.
