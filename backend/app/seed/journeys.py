@@ -128,6 +128,7 @@ def seed_appointments(
     profiles: dict[str, PatientProfile],
     doctors: list[Doctor],
     hospitals_by_id: dict[str, Hospital],
+    demo: dict[str, User] | None = None,
 ) -> list[Appointment]:
     """Generate appointments by walking each doctor's real schedule.
 
@@ -195,6 +196,7 @@ def seed_appointments(
                         )
 
     _assign_outcomes(rng, appointments, patients)
+    _pin_demo_appointments(rng, appointments, doctors, demo or {})
 
     db.add_all(appointments)
     db.flush()
@@ -253,6 +255,92 @@ def _make_appointment(
             else AppointmentStatus.PENDING  # replaced by _assign_outcomes
         ),
     )
+
+
+# Which specialty each demo persona should plausibly be seen by, and the
+# complaint the booking was made for. Sampling alone almost never lands a
+# booking on a specific patient — one demo account out of three thousand, per
+# slot — so reviewers signing in found an empty appointments page under a
+# system holding tens of thousands of them.
+DEMO_APPOINTMENTS: dict[str, tuple[tuple[str, ...], str]] = {
+    "patient": (("general_medicine", "endocrinology"), "Tiredness and low thyroid review"),
+    "maternal": (("obstetrics_gynaecology",), "Antenatal check — 28 weeks"),
+    "postpartum": (("obstetrics_gynaecology",), "Postnatal review and feeding support"),
+    "elderly": (("cardiology", "general_medicine"), "Blood pressure and dizziness review"),
+}
+
+
+def _pin_demo_appointments(
+    rng: random.Random,
+    appointments: list[Appointment],
+    doctors: list[Doctor],
+    demo: dict[str, User],
+) -> None:
+    """Hand a few already-generated bookings to the demo accounts.
+
+    Reassignment rather than fabrication: each one still sits on a real
+    published slot, with a real doctor, inside that doctor's capacity. Minting
+    appointments outside the schedule walk would have produced bookings the
+    availability lookup and the capacity dashboard disagree about.
+
+    Past visits are forced to COMPLETED. `_assign_outcomes` models attendance
+    honestly across the population, which for a single account can mean three
+    consecutive no-shows and a demo with no visit history to open — a property
+    of the sample, not something worth showing.
+    """
+    if not demo:
+        return
+
+    specialty_of = {
+        d.id: (d.specialty.code if d.specialty else "general_medicine") for d in doctors
+    }
+    now = datetime.now(timezone.utc)
+    claimed: set[int] = set()
+
+    for key, (specialties, complaint) in DEMO_APPOINTMENTS.items():
+        patient = demo.get(key)
+        if patient is None:
+            continue
+
+        def available(future: bool, codes: tuple[str, ...] = specialties) -> list[int]:
+            return [
+                i for i, a in enumerate(appointments)
+                if i not in claimed
+                and specialty_of.get(a.doctor_id) in codes
+                and ((a.scheduled_start > now) == future)
+            ]
+
+        # Two attended visits behind them and one booking ahead: enough for the
+        # history tab, the upcoming card and the doctor's queue to each show
+        # something. The past picks come off the end of the list, which the
+        # schedule walk leaves in date order, so they are recent visits rather
+        # than ones from the far edge of the history window.
+        picks = available(False)[-2:] + available(True)[:1]
+        for index in picks:
+            appointment = appointments[index]
+            claimed.add(index)
+            appointment.patient_user_id = patient.id
+            appointment.reason = complaint
+            appointment.chief_complaint = complaint
+            appointment.confirmed_at = appointment.confirmed_at or (
+                appointment.booked_at + timedelta(hours=rng.randint(1, 20))
+            )
+            if appointment.scheduled_start > now:
+                appointment.status = AppointmentStatus.CONFIRMED
+                continue
+            appointment.status = AppointmentStatus.COMPLETED
+            appointment.cancelled_at = None
+            appointment.cancellation_reason = None
+            duration = int(
+                (appointment.scheduled_end - appointment.scheduled_start).total_seconds() / 60
+            )
+            appointment.checked_in_at = appointment.scheduled_start - timedelta(
+                minutes=rng.randint(4, 20)
+            )
+            appointment.started_at = appointment.scheduled_start + timedelta(
+                minutes=rng.randint(0, 18)
+            )
+            appointment.completed_at = appointment.started_at + timedelta(minutes=duration)
 
 
 def _assign_outcomes(
@@ -378,12 +466,20 @@ def seed_consultations(
     doctors_by_id: dict[str, Doctor],
     *,
     limit: int,
+    demo: dict[str, User] | None = None,
 ) -> list[Consultation]:
     """Clinical records for completed appointments."""
     completed = [
         a for a in appointments if a.status == AppointmentStatus.COMPLETED
     ]
     rng.shuffle(completed)
+    # The limit is far below the number of completed visits, so a shuffle
+    # alone leaves the demo accounts with attended appointments that have no
+    # consultation note behind them — a doctor's view of the patient that is
+    # empty for the visits the demo is meant to show. Theirs are taken first;
+    # the rest of the sample is unchanged.
+    demo_ids = {u.id for u in (demo or {}).values()}
+    completed.sort(key=lambda a: a.patient_user_id not in demo_ids)
     consultations: list[Consultation] = []
 
     for appointment in completed[:limit]:
@@ -583,12 +679,31 @@ def seed_care_programmes_data(
         and 19 <= profiles[p.id].age <= 42
         and not profiles[p.id].is_pregnant
     ]
-    for patient in rng.sample(
-        postpartum_candidates, min(N_POSTPARTUM_CASES, len(postpartum_candidates))
-    ):
+    # The demo persona is pinned rather than sampled, and pinned first, so the
+    # postpartum pathway is always reachable by logging in rather than by
+    # hunting through 3000 patients for one who happens to qualify.
+    demo_postpartum = demo.get("postpartum")
+    if demo_postpartum is None:
+        chosen = rng.sample(
+            postpartum_candidates,
+            min(N_POSTPARTUM_CASES, len(postpartum_candidates)),
+        )
+    else:
+        rest = [p for p in postpartum_candidates if p.id != demo_postpartum.id]
+        chosen = [demo_postpartum] + rng.sample(
+            rest, max(0, min(N_POSTPARTUM_CASES - 1, len(rest)))
+        )
+
+    for patient in chosen:
         profile = profiles[patient.id]
         enrollment = enrol(patient, programmes["postpartum_care"], obstetricians)
-        delivered = date.today() - timedelta(days=rng.randint(5, 150))
+        # The demo mother is three weeks post-delivery: recent enough that the
+        # postpartum danger-sign rules are live and the newborn is a newborn,
+        # rather than a record that has gone quiet.
+        delivered = (
+            date.today() - timedelta(days=24) if patient is demo_postpartum
+            else date.today() - timedelta(days=rng.randint(5, 150))
+        )
         maternal_records.append(
             MaternalRecord(
                 patient_user_id=patient.id,
@@ -600,7 +715,10 @@ def seed_care_programmes_data(
                 gravida=rng.randint(1, 4),
                 para=rng.randint(1, 3),
                 blood_group=profile.blood_group,
-                newborn_name="Baby " + patient.full_name.split()[-1],
+                newborn_name=(
+                    "Sanuli Jayawardena" if patient is demo_postpartum
+                    else "Baby " + patient.full_name.split()[-1]
+                ),
                 newborn_dob=delivered,
                 newborn_birth_weight_kg=round(rng.uniform(2.4, 3.9), 2),
                 feeding_method=rng.choice(["Exclusive breastfeeding", "Mixed feeding"]),
@@ -650,6 +768,31 @@ def seed_care_programmes_data(
     }
 
 
+# What each demo persona is actually on, matched to the conditions recorded on
+# their profile rather than sampled from the pool, so the record stays
+# internally consistent when a reviewer reads the profile and the medication
+# list side by side.
+DEMO_MEDICATIONS: dict[str, list[tuple]] = {
+    # Hypothyroidism and iron-deficiency anaemia on file.
+    "patient": [
+        ("Levothyroxine", "50 mcg", "Once daily before breakfast", ["07:00"]),
+        ("Ferrous sulphate", "200 mg", "Twice daily after meals", ["08:00", "20:00"]),
+    ],
+    # Sri Lanka's antenatal standard: folate through the first trimester, then
+    # iron and calcium supplementation for the rest of the pregnancy.
+    "maternal": [
+        ("Folic acid", "1 mg", "Once daily", ["09:00"]),
+        ("Ferrous sulphate", "200 mg", "Twice daily after meals", ["08:00", "20:00"]),
+        ("Calcium carbonate", "500 mg", "Twice daily with food", ["08:00", "20:00"]),
+    ],
+    # Continued while breastfeeding; iron replaces what delivery cost.
+    "postpartum": [
+        ("Ferrous sulphate", "200 mg", "Twice daily after meals", ["08:00", "20:00"]),
+        ("Calcium carbonate", "500 mg", "Twice daily with food", ["08:00", "20:00"]),
+    ],
+}
+
+
 def seed_medications(
     db: Session,
     rng: random.Random,
@@ -693,21 +836,22 @@ def seed_medications(
     if len(on_medication) > N_MEDICATION_PATIENTS:
         on_medication = rng.sample(on_medication, N_MEDICATION_PATIENTS)
 
-    # The primary demo patient is sampled like anyone else, so she frequently
-    # ended up with no medications at all and a dashboard that looked broken —
-    # the first account anyone logs into showing the least. She has
-    # hypothyroidism and iron-deficiency anaemia on file; these are what that
-    # actually looks like on a prescription.
-    if demo.get("patient") and demo["patient"] not in on_medication:
-        on_medication.insert(0, demo["patient"])
+    # Demo accounts are sampled like anyone else, so they frequently ended up
+    # with no medications at all and a dashboard that looked broken — the
+    # first accounts anyone logs into showing the least.
+    demo_med_ids = {
+        demo[key].id for key in DEMO_MEDICATIONS if demo.get(key)
+    }
+    for key in DEMO_MEDICATIONS:
+        person = demo.get(key)
+        if person is not None and person not in on_medication:
+            on_medication.insert(0, person)
 
     for patient in on_medication:
-        if demo.get("patient") and patient.id == demo["patient"].id:
-            # Matched to her recorded conditions rather than sampled at
-            # random, so the demo record is internally consistent when a
-            # reviewer reads the profile and the medication list together.
-            add_medication(patient, ("Levothyroxine", "50 mcg", "Once daily before breakfast", ["07:00"]))
-            add_medication(patient, ("Ferrous sulphate", "200 mg", "Twice daily after meals", ["08:00", "20:00"]))
+        if patient.id in demo_med_ids:
+            key = next(k for k in DEMO_MEDICATIONS if demo.get(k) and demo[k].id == patient.id)
+            for spec in DEMO_MEDICATIONS[key]:
+                add_medication(patient, spec)
             continue
         for spec in rng.sample(MEDICATION_POOL, rng.randint(1, 3)):
             add_medication(patient, spec)

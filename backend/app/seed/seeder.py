@@ -702,7 +702,7 @@ def seed_all(db: Session, *, reset: bool = False) -> None:
     doctors_by_id = {d.id: d for d in doctors}
 
     appointments = journeys.seed_appointments(
-        db, rng, patients, profiles, doctors, hospitals_by_id
+        db, rng, patients, profiles, doctors, hospitals_by_id, demo
     )
     upcoming = sum(
         1 for a in appointments
@@ -711,7 +711,7 @@ def seed_all(db: Session, *, reset: bool = False) -> None:
     log(f"Appointments: {len(appointments)} ({len(appointments) - upcoming} historical, {upcoming} upcoming)")
 
     consultations = journeys.seed_consultations(
-        db, rng, appointments, doctors_by_id, limit=N_CONSULTATIONS
+        db, rng, appointments, doctors_by_id, limit=N_CONSULTATIONS, demo=demo
     )
     log(f"Consultations: {len(consultations)}")
 
@@ -745,6 +745,7 @@ def seed_all(db: Session, *, reset: bool = False) -> None:
     print("\nDemo accounts (password for all: Demo@1234)")
     print("  patient@suwapath.lk    Nimali Fernando   — patient")
     print("  maternal@suwapath.lk   Dilini Fernando   — patient, 28wk pregnant")
+    print("  postpartum@suwapath.lk Ishara Jayawardena — patient, 3wk postnatal + newborn")
     print("  elderly@suwapath.lk    Sunil Fernando    — patient, elderly care")
     print("  guardian@suwapath.lk   Nimal Fernando    — guardian of both above")
     print("  doctor@suwapath.lk     Dr. Dileepa Perera — endocrinologist")

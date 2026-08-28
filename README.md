@@ -558,6 +558,13 @@ cp ../.env.example ../.env          # then add your API keys — all optional
 PYTHONPATH=. .venv/bin/python -m app.seed.seeder --reset
 PYTHONPATH=. .venv/bin/uvicorn app.main:app --port 8000
 ```
+
+Then, **with the API running**, in a second terminal:
+
+```bash
+cd backend
+PYTHONPATH=. .venv/bin/python -m app.seed.demo_journeys
+```
 </details>
 
 <details>
@@ -574,10 +581,31 @@ $env:PYTHONPATH = "."
 .venv\Scripts\python -m app.seed.seeder --reset
 .venv\Scripts\uvicorn app.main:app --port 8000
 ```
+
+Then, **with the API running**, in a second terminal:
+
+```powershell
+cd backend
+$env:PYTHONPATH = "."
+.venv\Scripts\python -m app.seed.demo_journeys
+```
 </details>
 
 Seeding takes about 15 seconds and prints the demo accounts when it finishes.
 The first run also downloads the ~90 MB MiniLM embedding model.
+
+`demo_journeys` is the second step because it needs the API: it signs into each
+demo account over HTTP and *uses the product* — runs a symptom check, uploads a
+lab report, uploads an X-ray. Every row it creates therefore comes from the real
+red-flag engine, the real OCR and the real navigation logic. Skip it and the
+system works, but the demo dashboards open with no recommendation and no
+reports. Writing those rows straight into the database was the alternative, and
+it would let the demo show output the running product cannot actually produce.
+
+The knowledge base needs no seeding step: the clinical, policy and Sri
+Lanka/WHO corpora are code, and the API builds its retrieval index on startup.
+Re-run `python -m app.knowledge.ingest` only after adding doctors, hospitals or
+diagnostic tests, since the provider directory is generated from those rows.
 
 - API: <http://127.0.0.1:8000>
 - Interactive docs: <http://127.0.0.1:8000/docs>
@@ -689,6 +717,7 @@ Password for all accounts: `Demo@1234`
 |---|---|---|
 | `patient@suwapath.lk` | Nimali Fernando | Patient |
 | `maternal@suwapath.lk` | Dilini Fernando | Patient — 28 weeks pregnant |
+| `postpartum@suwapath.lk` | Ishara Jayawardena | Patient — 3 weeks postnatal, newborn on file |
 | `elderly@suwapath.lk` | Sunil Fernando | Patient — elderly care, large-text UI |
 | `guardian@suwapath.lk` | Nimal Fernando | Guardian of both patients above |
 | `doctor@suwapath.lk` | Dr. Dileepa Perera | Doctor — Endocrinology |
