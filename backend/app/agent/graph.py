@@ -28,6 +28,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Iterator
 
+# pyrefly: ignore [missing-import]
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
@@ -335,6 +336,8 @@ _FALLBACK_KEYWORDS = [
     ("consult", ("pain", "fever", "symptom", "hurt", "feel", "sick", "cough",
                  "dizzy", "headache", "bleeding", "rash", "breath", "ache",
                  "vomit", "nausea", "swollen", "itch", "tired")),
+    ("direct", ("what is suwapath", "what is suwa", "who are you", "what can you do",
+                "what type of thing", "your detail", "your details", "hello", "hi", "help")),
     ("knowledge", ("what is", "what does", "why does", "how does", "explain",
                    "is it normal", "tell me about")),
 ]
@@ -445,7 +448,13 @@ def dispatch(state: AgentState) -> list[Send]:
 def _run_agent(state: AgentState, route: str) -> dict:
     """Shared body for every agent node: tools, then a grounded reply."""
     started = time.perf_counter()
-    scope = state.get("scope") or {}
+    scope = dict(state.get("scope") or {})
+    if not scope.get("subject_user_id") and state.get("patient_id"):
+        scope.update({
+            "subject_user_id": state.get("patient_id"),
+            "role": "patient",
+            "permissions": "self",
+        })
     decision = state.get("_route") or {"route": route}
 
     tool_texts: list[str] = []
@@ -815,7 +824,9 @@ def merge_node(state: AgentState) -> dict:
     if completion:
         answer, source = completion.text, completion.provider
     else:
-        answer = "\n\n".join(o["answer"] for o in outputs)
+        answer = "\n\n".join(
+            o["answer"].strip() for o in outputs if o.get("answer") and o["answer"].strip()
+        )
         source = "concatenated"
 
     return {
@@ -887,9 +898,17 @@ def fulfil_node(state: AgentState) -> dict:
         "suggested_tests": tests,
     }
 
+    scope = dict(state.get("scope") or {})
+    if not scope.get("subject_user_id") and state.get("patient_id"):
+        scope.update({
+            "subject_user_id": state.get("patient_id"),
+            "role": "patient",
+            "permissions": "self",
+        })
+
     with agent_session() as db:
         pad, loop_trace = run_loop(
-            context=context, scope=state.get("scope") or {}, db=db
+            context=context, scope=scope, db=db
         )
 
     # Merge every payload the loop gathered. Providers accumulate across

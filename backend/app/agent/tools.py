@@ -110,6 +110,10 @@ def tool_appointments(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
     if not _has(scope, GuardianPermissionType.APPOINTMENTS):
         raise ToolDenied("This person has not shared their appointments with you.")
 
+    subject = scope.get("subject_user_id")
+    if not subject:
+        return "The patient has no upcoming appointments.", {"appointments": []}
+
     rows = db.execute(
         select(Appointment)
         .options(
@@ -118,7 +122,7 @@ def tool_appointments(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
             selectinload(Appointment.hospital),
         )
         .where(
-            Appointment.patient_user_id == scope["subject_user_id"],
+            Appointment.patient_user_id == subject,
             Appointment.scheduled_start >= datetime.now(timezone.utc),
             Appointment.status.notin_(
                 [str(AppointmentStatus.CANCELLED), str(AppointmentStatus.NO_SHOW)]
@@ -158,11 +162,12 @@ def tool_find_care(
     capabilities: list[str] | None = None, **_: Any
 ) -> tuple[str, dict]:
     """Capability-aware provider matching, reusing the production matcher."""
+    subject_id = scope.get("subject_user_id")
     profile = db.execute(
         select(PatientProfile).where(
-            PatientProfile.user_id == scope["subject_user_id"]
+            PatientProfile.user_id == subject_id
         )
-    ).scalar_one_or_none()
+    ).scalar_one_or_none() if subject_id else None
 
     criteria = MatchCriteria(
         specialty_code=specialty_code or "general_medicine",
@@ -216,7 +221,10 @@ def tool_records(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
     if not _has(scope, GuardianPermissionType.REPORTS):
         raise ToolDenied("This person has not shared their medical reports with you.")
 
-    subject = scope["subject_user_id"]
+    subject = scope.get("subject_user_id")
+    if not subject:
+        return "The patient has no uploaded records or imaging on file.", {"records": []}
+
     documents = db.execute(
         select(MedicalDocument)
         .options(selectinload(MedicalDocument.extracted))
@@ -283,9 +291,13 @@ def tool_medications(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
     if not _has(scope, GuardianPermissionType.MEDICATIONS):
         raise ToolDenied("This person has not shared their medications with you.")
 
+    subject = scope.get("subject_user_id")
+    if not subject:
+        return "The patient has no active medications on file.", {"medications": []}
+
     rows = db.execute(
         select(Medication).where(
-            Medication.patient_user_id == scope["subject_user_id"],
+            Medication.patient_user_id == subject,
             Medication.is_active.is_(True),
         )
     ).scalars().all()
@@ -377,10 +389,14 @@ def tool_directory(db: Session, scope: dict, *, question: str = "", **_: Any) ->
 
 def tool_recommendation(db: Session, scope: dict, **_: Any) -> tuple[str, dict]:
     """The patient's latest care recommendation, produced deterministically."""
+    subject = scope.get("subject_user_id")
+    if not subject:
+        return "No active care recommendation.", {"recommendation": None}
+
     recommendation = db.execute(
         select(Recommendation)
         .where(
-            Recommendation.patient_user_id == scope["subject_user_id"],
+            Recommendation.patient_user_id == subject,
             Recommendation.is_active.is_(True),
         )
         .order_by(Recommendation.created_at.desc())

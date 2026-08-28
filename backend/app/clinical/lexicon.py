@@ -51,7 +51,8 @@ LEXICON: dict[str, list[str]] = {
         "කැස්ස", "kassa", "இருமல்", "irumal",
     ],
     "coughing_blood": [
-        "coughing blood", "blood in sputum", "haemoptysis", "hemoptysis",
+        "coughing blood", "coughing up blood", "cough up blood", "coughed up blood",
+        "blood in sputum", "blood in phlegm", "haemoptysis", "hemoptysis",
         "blood when i cough", "ලේ කැස්ස", "le kassa",
     ],
     "wheezing": ["wheezing", "wheeze", "whistling breath", "asthma attack"],

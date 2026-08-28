@@ -83,7 +83,8 @@ _OUT_OF_SCOPE_PATTERNS = [
         r"what\s+(dose|dosage|medicine|medication|drug|tablet)s?\s+(should|do|can)\s+i|"
         r"which\s+(medicine|medication|antibiotic|drug|tablet)s?\s+(should|do|can)\s+i)", re.I)),
     ("dosage", re.compile(
-        r"how\s+(many|much)\s+(mg|ml|tablets?|pills?|capsules?|drops?|\w+)\s+(should|can|do)\s+i"
+        r"\bhow\s+(many|much)\b.{0,40}\b(mg|ml|tablets?|pills?|capsules?|drops?|dose|dosage)\b"
+        r"|\b(what|calculate|give\s+me)\b.{0,30}\b(dose|dosage)\b"
         r"|\bdosage\s+(for|of)\b", re.I)),
     # Route of administration. "How do I inject X" is not a dosage question and
     # slipped past the dosage rule entirely; self-administering an injection is
