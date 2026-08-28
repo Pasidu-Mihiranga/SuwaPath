@@ -3,11 +3,12 @@
  *
  * Shared by all five roles rather than duplicated per role: the editable
  * fields come from `PATCH /auth/me`, which is role-agnostic. Patient-only
- * sections (clinical background, accessibility) render conditionally, so a
+ * sections (clinical background, accessibility, guardians) render conditionally, so a
  * doctor or hospital admin sees a clean form without irrelevant medical fields.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import {
   Card,
   Chip,
@@ -94,8 +95,6 @@ function useProfileForm() {
         ) {
           payload[key] = toList(String(value));
         } else if (key === "sex") {
-          // "Prefer not to say" is the empty option; send null rather than ""
-          // so the enum validator does not reject it.
           payload[key] = value === "" ? null : value;
         } else {
           payload[key] = value;
@@ -105,7 +104,7 @@ function useProfileForm() {
       await refreshUser();
       setSaved(true);
     } catch (err) {
-      setError(errorMessage(err, "Could not save your changes."));
+      setError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -124,11 +123,11 @@ function Row({
   children: ReactNode;
 }) {
   return (
-    <div>
-      <label className="sp-field">{label}</label>
+    <label className="block">
+      <span className="block text-xs font-semibold text-ink-700 mb-1">{label}</span>
       {children}
-      {hint && <p className="mt-1 text-xs text-ink-500">{hint}</p>}
-    </div>
+      {hint && <span className="block text-xs text-ink-500 mt-1">{hint}</span>}
+    </label>
   );
 }
 
@@ -147,9 +146,9 @@ function SaveBar({
         {saving ? "Saving…" : "Save changes"}
       </button>
       {saved && (
-        <span className="inline-flex items-center gap-1.5 text-sm text-ok-text">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-ok-text">
           <Icon name="circleCheck" size={16} />
-          Saved
+          Saved successfully
         </span>
       )}
     </div>
@@ -160,45 +159,63 @@ function SaveBar({
 
 export function Profile() {
   const { user, form, set, save, loading, saving, error, saved } = useProfileForm();
+  const [guardians, setGuardians] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user?.role === "patient") {
+      api
+        .get("/patients/me/guardians")
+        .then(({ data }) => setGuardians(data))
+        .catch(() => setGuardians([]));
+    }
+  }, [user?.role]);
+
   if (loading || !user) return <Spinner />;
 
   const isPatient = user.role === "patient";
   const profile = user.patient_profile;
 
   return (
-    <div className="space-y-5 max-w-3xl">
-      <PageHeader title="My Profile" subtitle="Your account and contact details." />
+    <div className="max-w-4xl mx-auto space-y-6 pb-12 w-full">
+      <PageHeader title="My Profile" subtitle="Your personal, contact, and healthcare background." />
 
       {/* Identity summary */}
       <Card>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="sp-avatar h-16 w-16 text-xl">
-            {user.full_name
-              .split(" ")
-              .map((part) => part[0])
-              .slice(0, 2)
-              .join("")}
-          </div>
-          <div className="min-w-0">
-            <p className="text-lg font-bold text-ink-900">{user.full_name}</p>
-            <p className="text-sm text-ink-500">{user.email}</p>
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              <Chip tone="info">{ROLE_LABEL[user.role]}</Chip>
-              {isPatient && profile?.age != null && (
-                <Chip tone="neutral">{profile.age} yrs</Chip>
-              )}
-              {user.doctor_profile?.specialty_name && (
-                <Chip tone="programme">{user.doctor_profile.specialty_name}</Chip>
-              )}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="sp-avatar h-16 w-16 text-xl bg-brand-100 text-brand-800 font-bold shrink-0">
+              {user.full_name
+                .split(" ")
+                .map((part) => part[0])
+                .slice(0, 2)
+                .join("")}
+            </div>
+            <div className="min-w-0">
+              <p className="text-xl font-bold text-ink-900 truncate">{user.full_name}</p>
+              <p className="text-sm text-ink-500 truncate">{user.email}</p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <Chip tone="info">{ROLE_LABEL[user.role]}</Chip>
+                {isPatient && profile?.age != null && (
+                  <Chip tone="neutral">{profile.age} yrs</Chip>
+                )}
+                {user.doctor_profile?.specialty_name && (
+                  <Chip tone="programme">{user.doctor_profile.specialty_name}</Chip>
+                )}
+              </div>
             </div>
           </div>
+          <Link to="/patient/settings" className="sp-btn sp-btn-secondary sp-btn-sm shrink-0">
+            <Icon name="history" size={15} />
+            <span>Account Settings</span>
+          </Link>
         </div>
       </Card>
 
       <ErrorNote message={error} />
 
+      {/* Personal Details */}
       <Card title="Personal details">
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Row label="Full name">
             <input
               className="sp-input"
@@ -214,10 +231,8 @@ export function Profile() {
               placeholder="+94…"
             />
           </Row>
-          <Row label="Email">
-            {/* Email is the login identity — changing it is an auth flow, not
-                a profile edit, so it is shown read-only here. */}
-            <input className="sp-input" value={user.email} disabled />
+          <Row label="Email" hint="Email address is linked to your login identity.">
+            <input className="sp-input bg-ink-50 text-ink-600" value={user.email} disabled />
           </Row>
           <Row label="Preferred language">
             <select
@@ -233,7 +248,7 @@ export function Profile() {
             </select>
           </Row>
         </div>
-        <div className="mt-4">
+        <div className="mt-5 pt-3 border-t border-ink-100/60">
           <SaveBar
             saving={saving}
             saved={saved}
@@ -242,16 +257,15 @@ export function Profile() {
         </div>
       </Card>
 
+      {/* Clinical Background (Patient Only) */}
       {isPatient && (
         <>
           <Card
             title="Clinical background"
             subtitle="Shown to clinicians in your pre-consultation summary."
           >
-            <div className="grid sm:grid-cols-2 gap-4">
-              {/* Optional, and it stays optional. Leaving it unset is a real
-                  answer, not missing data — see lib/illustration.ts. */}
-              <Row label="Sex" hint="Optional. Used for clinical context and artwork.">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Row label="Sex" hint="Used for clinical context and tailored health pathways.">
                 <select
                   className="sp-select"
                   value={form.sex}
@@ -263,11 +277,12 @@ export function Profile() {
                   <option value="other">Other</option>
                 </select>
               </Row>
-              <Row label="City">
+              <Row label="City / Region">
                 <input
                   className="sp-input"
                   value={form.city}
                   onChange={(event) => set("city", event.target.value)}
+                  placeholder="e.g. Colombo, Kandy, Galle"
                 />
               </Row>
               <Row label="Blood group">
@@ -275,7 +290,7 @@ export function Profile() {
                   className="sp-input"
                   value={form.blood_group}
                   onChange={(event) => set("blood_group", event.target.value)}
-                  placeholder="O+"
+                  placeholder="e.g. O+, A-, B+"
                 />
               </Row>
               <Row label="Chronic conditions">
@@ -283,7 +298,7 @@ export function Profile() {
                   className="sp-input"
                   value={form.chronic_conditions}
                   onChange={(event) => set("chronic_conditions", event.target.value)}
-                  placeholder="Comma separated"
+                  placeholder="e.g. Diabetes, Hypertension"
                 />
               </Row>
               <Row label="Allergies">
@@ -291,7 +306,7 @@ export function Profile() {
                   className="sp-input"
                   value={form.allergies}
                   onChange={(event) => set("allergies", event.target.value)}
-                  placeholder="Comma separated"
+                  placeholder="e.g. Penicillin, Peanuts"
                 />
               </Row>
               <Row label="Current medications">
@@ -299,17 +314,16 @@ export function Profile() {
                   className="sp-input"
                   value={form.current_medications}
                   onChange={(event) => set("current_medications", event.target.value)}
-                  placeholder="Comma separated"
+                  placeholder="e.g. Metformin 500mg, Thyroxine"
                 />
               </Row>
             </div>
             <div className="mt-4">
               <Notice tone="info" icon="info">
-              Keeping allergies and medications current directly improves the
-              safety of every recommendation SuwaPath makes.
+                Keeping allergies and medications up to date directly improves the accuracy and safety of your care recommendations.
               </Notice>
             </div>
-            <div className="mt-4">
+            <div className="mt-5 pt-3 border-t border-ink-100/60">
               <SaveBar
                 saving={saving}
                 saved={saved}
@@ -327,8 +341,68 @@ export function Profile() {
             </div>
           </Card>
 
+          {/* Linked Guardians & Family Carers (NEW: Prominently displayed on profile) */}
+          <Card
+            title="Linked Guardians & Carers"
+            subtitle="Family members authorized to receive health updates or manage appointments."
+            action={
+              <Link
+                to="/patient/sharing"
+                className="text-xs font-semibold text-brand-700 hover:underline inline-flex items-center gap-1"
+              >
+                <span>Manage consent</span>
+                <Icon name="arrowRight" size={13} />
+              </Link>
+            }
+          >
+            {guardians.length > 0 ? (
+              <div className="space-y-3">
+                {guardians.map((rel: any) => (
+                  <div
+                    key={rel.relationship_id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-ink-100 p-3.5 bg-ink-50/40"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="sp-icon-tile bg-brand-50 text-brand-700 !h-9 !w-9 shrink-0">
+                        <Icon name="privacy" size={18} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm text-ink-900">
+                          {rel.guardian_name ?? rel.guardian_email}
+                        </p>
+                        <p className="text-xs text-ink-500">
+                          {rel.relationship_label} · {rel.granted_permissions.length} active scope(s)
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-end sm:self-auto">
+                      <Chip tone={rel.is_active ? "ok" : "neutral"}>
+                        {rel.is_active ? "Connected" : "Inactive"}
+                      </Chip>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-ink-200 p-4 text-center">
+                <p className="text-sm font-medium text-ink-700">No guardian currently linked</p>
+                <p className="text-xs text-ink-500 mt-1 max-w-md mx-auto">
+                  You can grant permission to a family member or caregiver to monitor emergency alerts, check-ins, or manage appointments.
+                </p>
+                <Link
+                  to="/patient/sharing"
+                  className="sp-btn sp-btn-secondary sp-btn-sm inline-flex items-center gap-1.5 mt-3"
+                >
+                  <Icon name="privacy" size={14} />
+                  <span>Add Guardian or Carer</span>
+                </Link>
+              </div>
+            )}
+          </Card>
+
+          {/* Emergency Contact */}
           <Card title="Emergency contact">
-            <div className="grid sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Row label="Contact name">
                 <input
                   className="sp-input"
@@ -336,6 +410,7 @@ export function Profile() {
                   onChange={(event) =>
                     set("emergency_contact_name", event.target.value)
                   }
+                  placeholder="e.g. Sunil Fernando (Spouse)"
                 />
               </Row>
               <Row label="Contact phone">
@@ -345,10 +420,11 @@ export function Profile() {
                   onChange={(event) =>
                     set("emergency_contact_phone", event.target.value)
                   }
+                  placeholder="+94 77…"
                 />
               </Row>
             </div>
-            <div className="mt-4">
+            <div className="mt-5 pt-3 border-t border-ink-100/60">
               <SaveBar
                 saving={saving}
                 saved={saved}
@@ -363,14 +439,14 @@ export function Profile() {
 
       {user.doctor_profile && (
         <Card title="Practice details" subtitle="Managed by your hospital administrator.">
-          <div className="grid sm:grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             {[
               ["Specialty", user.doctor_profile.specialty_name],
               ["Hospital", user.doctor_profile.hospital_name],
             ].map(([label, value]) => (
-              <div key={label as string}>
+              <div key={label as string} className="p-3 bg-ink-50/50 rounded-xl border border-ink-100">
                 <p className="text-xs text-ink-500">{label}</p>
-                <p className="font-medium text-ink-900">{value ?? "—"}</p>
+                <p className="font-semibold text-ink-900 mt-0.5">{value ?? "—"}</p>
               </div>
             ))}
           </div>
@@ -387,8 +463,6 @@ export function Settings() {
   const [privacy, setPrivacy] = useState<any>(null);
 
   useEffect(() => {
-    // Guardians a patient has shared with — the most consequential privacy
-    // setting a patient has, so it is surfaced here as well as on its own page.
     api
       .get("/patients/me/guardians")
       .then(({ data }) => setPrivacy(data))
@@ -399,7 +473,7 @@ export function Settings() {
   const isPatient = user.role === "patient";
 
   return (
-    <div className="space-y-5 max-w-3xl">
+    <div className="max-w-4xl mx-auto space-y-6 pb-12 w-full">
       <PageHeader
         title="Settings"
         subtitle="Language, accessibility and privacy preferences."
@@ -425,7 +499,7 @@ export function Settings() {
           The symptom assistant replies in this language. Clinical warning
           detection works identically in all three.
         </p>
-        <div className="mt-4">
+        <div className="mt-5 pt-3 border-t border-ink-100/60">
           <SaveBar
             saving={saving}
             saved={saved}
@@ -439,23 +513,23 @@ export function Settings() {
           <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
-              className="h-5 w-5 mt-0.5 accent-brand-600"
+              className="h-5 w-5 mt-0.5 accent-brand-600 rounded"
               checked={Boolean(form.accessibility_large_text)}
               onChange={(event) =>
                 set("accessibility_large_text", event.target.checked)
               }
             />
             <span>
-              <span className="font-medium text-ink-900">
+              <span className="font-semibold text-ink-900">
                 Larger text and buttons
               </span>
-              <span className="block text-sm text-ink-500">
+              <span className="block text-sm text-ink-500 mt-0.5">
                 Increases type size and tap-target size across the whole app.
                 Recommended for the elderly care pathway.
               </span>
             </span>
           </label>
-          <div className="mt-4">
+          <div className="mt-5 pt-3 border-t border-ink-100/60">
             <SaveBar
               saving={saving}
               saved={saved}
@@ -478,7 +552,7 @@ export function Settings() {
                   className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3"
                 >
                   <div>
-                    <p className="font-medium text-ink-900">
+                    <p className="font-semibold text-ink-900">
                       {relationship.guardian_name}
                     </p>
                     <p className="text-xs text-ink-500">
@@ -498,28 +572,27 @@ export function Settings() {
               No one else currently has access to your health information.
             </p>
           )}
-          <a href="/patient/sharing" className="sp-btn sp-btn-secondary mt-4">
-            <Icon name="lock" size={16} />
-            Manage sharing &amp; consent
-          </a>
+          <Link to="/patient/sharing" className="sp-btn sp-btn-secondary mt-4 inline-flex items-center gap-1.5">
+            <Icon name="privacy" size={16} />
+            <span>Manage sharing &amp; consent</span>
+          </Link>
         </Card>
       )}
 
       <Card title="Account">
-        <div className="grid sm:grid-cols-2 gap-4 text-sm">
-          <div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <div className="p-3 bg-ink-50/50 rounded-xl border border-ink-100">
             <p className="text-xs text-ink-500">Signed in as</p>
-            <p className="font-medium text-ink-900">{user.email}</p>
+            <p className="font-semibold text-ink-900 mt-0.5">{user.email}</p>
           </div>
-          <div>
+          <div className="p-3 bg-ink-50/50 rounded-xl border border-ink-100">
             <p className="text-xs text-ink-500">Role</p>
-            <p className="font-medium text-ink-900">{ROLE_LABEL[user.role]}</p>
+            <p className="font-semibold text-ink-900 mt-0.5">{ROLE_LABEL[user.role]}</p>
           </div>
         </div>
         <div className="mt-4">
-              <Notice tone="info" icon="info">
-          To change your email or password, contact SuwaPath support on
-          0112 123 456.
+          <Notice tone="info" icon="info">
+            To change your email or password, contact SuwaPath support on 0112 123 456.
           </Notice>
         </div>
       </Card>
