@@ -224,28 +224,34 @@ jobs:
               fi
             fi
 
-            # 2. Update Frontend static files
-            mv deploy/docker-compose.yml docker-compose.yml 2>/dev/null || true
+            # 2. Update Frontend static files & compose configuration
+            if [ -f deploy/docker-compose.yml ]; then
+              mv deploy/docker-compose.yml docker-compose.yml
+            fi
+            rm -rf deploy 2>/dev/null || true
+            mkdir -p deploy
+            ln -sf /opt/suwapath/docker-compose.yml /opt/suwapath/deploy/docker-compose.yml
+            ln -sf /opt/suwapath/.env /opt/suwapath/deploy/.env
+
             rm -rf frontend/dist
             mkdir -p frontend
             mv frontend-dist frontend/dist
-            rmdir deploy 2>/dev/null || true
 
             # 3. Pull latest image from GHCR
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker compose -f /opt/suwapath/deploy/docker-compose.yml pull backend || docker compose pull backend
+            docker compose pull backend
 
             # 4. Wait for Postgres
-            docker compose -f /opt/suwapath/deploy/docker-compose.yml up -d postgres || docker compose up -d postgres
+            docker compose up -d postgres
             for i in $(seq 1 30); do
-              if docker compose -f /opt/suwapath/deploy/docker-compose.yml exec -T postgres pg_isready -q; then break; fi
+              if docker compose exec -T postgres pg_isready -q; then break; fi
               sleep 2
             done
 
             # 5. Run idempotent database migrations
-            docker compose -f /opt/suwapath/deploy/docker-compose.yml run --rm --no-deps backend python scripts/migrate.py
-            docker compose -f /opt/suwapath/deploy/docker-compose.yml run --rm --no-deps backend python scripts/encrypt_phi_columns.py --apply
+            docker compose run --rm --no-deps backend python scripts/migrate.py
+            docker compose run --rm --no-deps backend python scripts/encrypt_phi_columns.py --apply
 
             # 6. Restart backend & prune old images
-            docker compose -f /opt/suwapath/deploy/docker-compose.yml up -d || docker compose up -d
+            docker compose up -d
             docker image prune -f
