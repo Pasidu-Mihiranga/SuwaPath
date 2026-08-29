@@ -30,6 +30,7 @@ LEXICON: dict[str, list[str]] = {
         "shortness of breath", "short of breath", "breathless", "breathlessness",
         "difficulty breathing", "hard to breathe", "cant breathe", "can't breathe",
         "trouble breathing", "gasping", "sob", "dyspnea", "dyspnoea",
+        "barely breathe", "can barely breathe", "hardly breathe",
         "හුස්ම ගැනීමේ අපහසුතාව", "husma ganna amaruyi", "husma", "மூச்சுத் திணறல்",
         "moochu thinaral",
     ],
@@ -42,8 +43,10 @@ LEXICON: dict[str, list[str]] = {
         "sweaty", "දහඩිය", "dahadiya", "வியர்வை", "viyarvai",
     ],
     "radiating_pain": [
-        "pain spreads", "spreading to arm", "radiating", "pain in left arm",
-        "pain to jaw", "pain going to my arm", "shoulder and arm pain",
+        "pain spreads", "spreading to arm", "spreading to my arm", "spreading to left arm",
+        "spreading to my left arm", "spreading to the left arm", "radiating to my arm",
+        "radiating to left arm", "radiating to my left arm", "radiating to arm", "radiating",
+        "pain in left arm", "pain to jaw", "pain going to my arm", "shoulder and arm pain",
         "අත දක්වා පැතිරෙන", "atha dakwa",
     ],
     "cough": [
@@ -143,6 +146,8 @@ LEXICON: dict[str, list[str]] = {
     ],
     "vomiting_blood": [
         "vomiting blood", "blood in vomit", "haematemesis", "hematemesis",
+        "vomited blood", "vomiting large amounts of blood",
+        "vomiting large amounts of bright red blood", "throwing up blood",
         "ලේ වමනය", "le wamanaya",
     ],
     "nausea": ["nausea", "nauseous", "feel sick", "queasy", "ඔක්කාරය", "okkaraya"],
@@ -186,6 +191,9 @@ LEXICON: dict[str, list[str]] = {
     ],
     "swelling": [
         "swelling", "swollen feet", "swollen hands", "swollen face", "puffiness",
+        "throat tightening", "throat is tightening", "throat tightening up", "throat is tightening up",
+        "throat swelling", "swelling in throat", "swelling of throat",
+        "lip swelling", "tongue swelling", "swollen tongue", "swollen lips",
         "oedema", "edema", "ඉදිමීම", "idimima", "வீக்கம்",
     ],
     "contractions": ["contractions", "labour pain", "labor pains", "regular pains"],
