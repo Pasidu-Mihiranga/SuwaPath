@@ -140,7 +140,7 @@ def cag_node(state: AgentState) -> dict:
 
     return {
         "answer": hit.answer,
-        "routes": [],
+        "routes": [{"route": "direct", "confidence": 1.0, "reasoning": "Product FAQ / Direct CAG match"}],
         "suggestions": hit.suggestions,
         "cag": {"hit": True, "key": hit.key, "kind": hit.kind, "score": hit.score},
         "trace": [{
@@ -334,7 +334,9 @@ _FALLBACK_KEYWORDS = [
              "right now", "recently", "2025", "2026")),
     ("consult", ("pain", "fever", "symptom", "hurt", "feel", "sick", "cough",
                  "dizzy", "headache", "bleeding", "rash", "breath", "ache",
-                 "vomit", "nausea", "swollen", "itch", "tired")),
+                 "vomit", "nausea", "swollen", "itch", "tired", "droop",
+                 "slur", "speech", "stroke", "seizure", "faint", "collapse",
+                 "unconscious", "tighten")),
     ("direct", ("what is suwapath", "what is suwa", "who are you", "what can you do",
                 "what type of thing", "your detail", "your details", "hello", "hi", "help")),
     ("knowledge", ("what is", "what does", "why does", "how does", "explain",
@@ -379,6 +381,12 @@ _ASKING_POLICY = re.compile(
 def _fallback_routes(message: str) -> list[dict]:
     """Keyword multi-intent detection, used when no LLM router is available."""
     lowered = (message or "").lower()
+    if any(k in lowered for k in ("what is suwapath", "what is suwa", "who are you", "what can you do", "what type of thing", "tell me about yourself", "your detail", "your details")):
+        return [{
+            "route": "direct",
+            "confidence": 0.8,
+            "reasoning": "Asking about assistant identity or capabilities.",
+        }]
     if _ASKING_POLICY.search(lowered):
         return [{
             "route": "knowledge",

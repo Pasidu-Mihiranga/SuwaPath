@@ -805,7 +805,11 @@ Answer the patient's specific question calmly, clearly, and safely in {language_
         answer = completion.text.strip()
         source = completion.provider
     else:
-        answer = _escalation_markdown(red_flags, recommendation)
+        answer = (
+            "**Please remain seated and resting while waiting for the 1990 ambulance.**\n\n"
+            "Do not take unprescribed pain killers or aspirin unless specifically instructed by the 1990 operator or attending emergency team, as they may complicate emergency assessment.\n\n"
+            + _escalation_markdown(red_flags, recommendation)
+        )
         source = "deterministic"
 
     return ConsultTurn(
