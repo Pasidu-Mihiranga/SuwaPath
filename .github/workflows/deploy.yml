@@ -28,6 +28,11 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
 
+      - name: Install system dependencies (Tesseract OCR)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
       - name: Install backend dependencies
         working-directory: backend
         run: |
@@ -39,7 +44,7 @@ jobs:
         env:
           ALLOW_RULE_BASED_FALLBACK: "true"
         run: |
-          pytest tests/test_eligibility.py tests/test_enums.py tests/test_image_validation.py tests/test_report_parsing.py tests/test_coverage.py tests/test_agent.py tests/test_agentic.py tests/test_react.py tests/test_roles.py tests/test_scenarios.py -v
+          pytest tests/ -v
 
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
