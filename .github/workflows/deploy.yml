@@ -244,7 +244,7 @@ jobs:
             # 4. Wait for Postgres
             docker compose up -d postgres
             for i in $(seq 1 30); do
-              if docker compose exec -T postgres pg_isready -q; then break; fi
+              if docker compose exec -T postgres pg_isready -U suwapath -d suwapath -q; then break; fi
               sleep 2
             done
 

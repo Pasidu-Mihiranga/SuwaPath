@@ -18,18 +18,20 @@
 # writing to a root-owned directory fails on first boot. /opt/suwapath/data
 # is chown'd to 1000:1000 once during provisioning.
 
+name: suwapath
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-suwapath}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-suwapath_prod_pass_7749}
+      POSTGRES_DB: ${POSTGRES_DB:-suwapath}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-suwapath} -d ${POSTGRES_DB:-suwapath}"]
       interval: 5s
       timeout: 5s
       retries: 10
