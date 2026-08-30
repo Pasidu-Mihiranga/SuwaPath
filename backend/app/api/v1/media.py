@@ -216,8 +216,13 @@ def upload_document(
     # strength of a file that was never a medical report is a recommendation
     # with nothing behind it.
     if result.not_a_report_reason:
+        document.processing_status = ProcessingStatus.FAILED
+        document.processing_error = result.not_a_report_reason
         db.commit()
-        return _document_dict(db, document, report, None)
+        raise HTTPException(
+            status_code=422,
+            detail=result.not_a_report_reason,
+        )
 
     # Feed the finding into shared care navigation (internal rule 5).
     has_critical = any(v.flag == ResultFlag.CRITICAL for v in result.values)

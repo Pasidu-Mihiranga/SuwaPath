@@ -30,6 +30,13 @@ LEXICON: dict[str, list[str]] = {
         "shortness of breath", "short of breath", "breathless", "breathlessness",
         "difficulty breathing", "hard to breathe", "cant breathe", "can't breathe",
         "trouble breathing", "gasping", "sob", "dyspnea", "dyspnoea",
+        # Spoken, not typed. Dictation expands contractions — a patient who
+        # would type "can't breathe" is transcribed as "cannot breathe", which
+        # matched nothing and cost the concept that half the emergency rules
+        # depend on.
+        "cannot breathe", "cannot breath", "unable to breathe", "can not breathe",
+        "struggling to breathe", "struggling for breath", "fighting for breath",
+        "gasping for air", "cant get air", "can't get air", "cannot get air",
         "හුස්ම ගැනීමේ අපහසුතාව", "husma ganna amaruyi", "husma", "மூச்சுத் திணறல்",
         "moochu thinaral",
     ],
@@ -44,6 +51,15 @@ LEXICON: dict[str, list[str]] = {
     "radiating_pain": [
         "pain spreads", "spreading to arm", "radiating", "pain in left arm",
         "pain to jaw", "pain going to my arm", "shoulder and arm pain",
+        # Said aloud, radiation is described as direction of travel rather
+        # than with the word "radiating": "the pain is going down my left
+        # arm". This concept never fires a rule on its own — it only upgrades
+        # chest pain to the heart-attack pattern — so broad phrasing here
+        # cannot cause a dispatch by itself.
+        "going down my arm", "going down my left arm", "down my left arm",
+        "down the left arm", "going into my jaw", "into my jaw", "up to my jaw",
+        "pain in my left arm", "pain in my jaw", "pain in my shoulder and arm",
+        "spreading to my arm", "spreads to my arm", "moving to my arm",
         "අත දක්වා පැතිරෙන", "atha dakwa",
     ],
     "cough": [
@@ -91,11 +107,27 @@ LEXICON: dict[str, list[str]] = {
     "arm_weakness": [
         "arm weakness", "cant lift my arm", "weakness on one side",
         "one side weak", "left side weak", "right side weak", "hemiplegia",
-        "numbness one side", "අත දුර්වල", "atha durwala",
+        "numbness one side",
+        # Spoken phrasing. Dictation expands the contraction, and a bystander
+        # reports the limb before the deficit: "her arm has gone weak", not
+        # "arm weakness". Stroke treatment is measured in minutes, so these
+        # are the phrasings least affordable to miss.
+        "cannot lift my arm", "cannot lift her arm", "cannot lift his arm",
+        "cannot move my arm", "cannot move her arm", "cannot move his arm",
+        "cannot raise", "arm has gone weak", "arm is weak", "arm feels weak",
+        "arm went weak", "weak on one side", "numbness on one side",
+        "one arm is weak", "cant move my arm", "can't move my arm",
+        "අත දුර්වල", "atha durwala",
     ],
     "speech_difficulty": [
         "slurred speech", "cant speak", "can't speak", "speech difficulty",
-        "trouble speaking", "confused speech", "කතා කරන්න බැරි", "katha karanna bari",
+        "trouble speaking", "confused speech",
+        # As above: "cannot speak" is what the microphone hears, and the
+        # subject-first form "her speech is slurred" is how it is reported.
+        "cannot speak", "can not speak", "cannot talk", "cant talk",
+        "can't talk", "speech is slurred", "speech has gone", "slurring",
+        "words are slurred", "not making any sense when",
+        "කතා කරන්න බැරි", "katha karanna bari",
     ],
     "neck_stiffness": [
         "stiff neck", "neck stiffness", "cant bend my neck", "neck rigid",
@@ -158,6 +190,18 @@ LEXICON: dict[str, list[str]] = {
     "severe_bleeding": [
         "severe bleeding", "heavy bleeding", "bleeding a lot", "wont stop bleeding",
         "won't stop bleeding", "uncontrolled bleeding", "haemorrhage", "hemorrhage",
+        # Said aloud, the subject comes first: "the bleeding won't stop", not
+        # "won't stop bleeding". Only the cessation phrasings are listed —
+        # "bleeding" alone is deliberately not a concept, because a shaving cut
+        # is bleeding and this rule dispatches an ambulance.
+        "bleeding will not stop", "bleeding wont stop", "bleeding won't stop",
+        "bleeding does not stop", "bleeding doesnt stop", "bleeding is not stopping",
+        "bleeding keeps coming", "soaked through", "losing a lot of blood",
+        # The adverb also follows the verb when spoken: "I am bleeding
+        # heavily", not "heavy bleeding". This is the phrasing a postpartum
+        # haemorrhage is reported in, and that rule has no other way in.
+        "bleeding heavily", "bleeding badly", "bleeding very badly",
+        "blood everywhere",
         "දැඩි ලේ ගැලීම", "le galima",
     ],
     "injury": [
@@ -177,6 +221,16 @@ LEXICON: dict[str, list[str]] = {
     "reduced_fetal_movement": [
         "baby not moving", "reduced fetal movement", "less baby movement",
         "baby movements decreased", "no kicks", "baby stopped moving",
+        # Longer forms deliberately listed separately rather than relying on
+        # "baby not moving" as a substring: the words people actually say put
+        # something between "baby" and "not", and the index matches literally.
+        "baby is not moving", "baby isnt moving", "baby is not kicking",
+        "baby not kicking", "baby has not moved", "baby hasnt moved",
+        # Phrased as a denial, which is the signal rather than something to
+        # discard. Listed as whole surface forms so the negation window sees
+        # nothing before them and cannot cancel the concept they establish.
+        "not felt the baby", "have not felt the baby", "havent felt the baby",
+        "no baby movement", "no fetal movement", "no movement from the baby",
         "දරුවා චලනය අඩු", "daruwa chalanaya adu",
     ],
     "leaking_fluid": [
@@ -257,10 +311,42 @@ NEGATION_MARKERS = (
 # my shoulder aches" denies the chest pain and asserts the shoulder — without
 # these, the denial swallowed both. Commas would be the natural marker but
 # `normalise` has already removed them, so these are the ones left standing.
+#
+# " and " is here for the spoken path specifically. People say two findings in
+# one breath — "she cannot breathe and her face is swelling up" — and the
+# "not " inside "cannot" sat in the lookback window for *swelling*, so the
+# second finding was discarded and the airway rule that needs both never
+# fired. A conjunction joins two clauses; it does not carry a denial into the
+# one after it.
+#
+# The cost is the rarer "no fever and vomiting", where a single denial was
+# meant to cover both and the second is now read as asserted. That is
+# over-triage on an unusual phrasing, traded against under-triage on a common
+# one. Denials that repeat the marker — "no fever and no vomiting" — are
+# unaffected, because the marker after the conjunction is the one that governs.
 CLAUSE_RESETS = (
     " but ", " however ", " just ", " only ", " though ", " although ",
-    " except ", " otherwise ", " apart from ", " besides ",
+    " except ", " otherwise ", " apart from ", " besides ", " and ",
     " නමුත් ", " namuth ", " ஆனால் ",
+)
+
+# Words that invert a denial rather than carrying it, because what is being
+# denied is the symptom *ending*. "The bleeding will not stop" put "not " in
+# the lookback window and so discarded `severe_bleeding` — under-triage on
+# possibly the single sentence a frightened person is most likely to say out
+# loud, and the one the bleeding first-aid script exists for.
+#
+# Matched against the word directly after the negation marker, not anywhere in
+# the window. That distinction is the whole safety of it: "no more bleeding"
+# stays a denial because "more" is not a cessation verb, while "won't stop
+# bleeding" does not.
+NEGATION_BLOCKERS = (
+    "stop", "stops", "stopping", "stopped",
+    "settle", "settles", "settling", "settled",
+    "ease", "eases", "easing", "eased",
+    "improve", "improves", "improving", "improved",
+    "getting better", "go away", "goes away", "going away", "gone away",
+    "let up", "letting up", "calm down", "calming down",
 )
 
 _CONCEPT_INDEX: list[tuple[str, str]] = sorted(
@@ -307,7 +393,16 @@ def _is_negated(haystack: str, position: int) -> bool:
         return False
 
     tail = window[last_negation:]
-    return not any(reset in tail for reset in CLAUSE_RESETS)
+    if any(reset in tail for reset in CLAUSE_RESETS):
+        return False
+
+    # Drop the marker itself and look at what it actually governs.
+    words = tail.split(maxsplit=1)
+    governed = words[1] if len(words) > 1 else ""
+    if any(governed.startswith(blocker) for blocker in NEGATION_BLOCKERS):
+        return False
+
+    return True
 
 
 def extract_concepts(text: str) -> tuple[set[str], set[str]]:
@@ -403,8 +498,9 @@ PROXIMITY_RULES: list[tuple[set[str], set[str], str]] = [
     ),
     (
         {"chest", "පපුව", "පපුවේ", "மார்பு"},
-        {"pain", "painful", "hurts", "tight", "tightness", "heavy", "heaviness",
-         "pressure", "discomfort", "burning"},
+        {"pain", "painful", "hurts", "hurting", "ache", "aching", "sore",
+         "tight", "tightness", "heavy", "heaviness",
+         "pressure", "discomfort", "burning", "crushing", "squeezing"},
         "chest_pain",
     ),
     (

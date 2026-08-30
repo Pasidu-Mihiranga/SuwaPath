@@ -29,6 +29,65 @@ const LANG_TAGS: Record<string, string> = {
   ta: "ta-LK",
 };
 
+let voicesReady: Promise<SpeechSynthesisVoice[]> | null = null;
+
+/** Browsers load voices asynchronously; the first speak() often sees an empty list. */
+function loadVoices(): Promise<SpeechSynthesisVoice[]> {
+  if (!speechSupported()) return Promise.resolve([]);
+
+  const existing = window.speechSynthesis.getVoices();
+  if (existing.length > 0) return Promise.resolve(existing);
+
+  if (!voicesReady) {
+    voicesReady = new Promise((resolve) => {
+      const finish = () => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          window.speechSynthesis.removeEventListener("voiceschanged", onChange);
+          resolve(voices);
+        }
+      };
+      const onChange = () => finish();
+      window.speechSynthesis.addEventListener("voiceschanged", onChange);
+      finish();
+      window.setTimeout(finish, 300);
+    });
+  }
+  return voicesReady;
+}
+
+function pickVoice(
+  voices: SpeechSynthesisVoice[],
+  language: string,
+): SpeechSynthesisVoice | null {
+  const tag = LANG_TAGS[language] ?? LANG_TAGS.en;
+  return (
+    voices.find((v) => v.lang === tag)
+    ?? voices.find((v) => v.lang.startsWith(tag.split("-")[0]))
+    ?? null
+  );
+}
+
+/** Prefer the patient's language, but read Latin-script doctor notes in English. */
+export function resolveSpeakLanguage(text: string, preferred?: string): string {
+  const language = preferred ?? "en";
+  if (language === "en") return "en";
+  if (pickVoice(window.speechSynthesis.getVoices(), language)) return language;
+  if (/^[\x20-\x7E\s]+$/.test(text.trim())) return "en";
+  return language;
+}
+
+/**
+ * Language tag for speech *recognition* (dictation).
+ * si-LK / ta-LK are unreliable in desktop Chrome, so bilingual users get
+ * English recognition while keeping their UI language.
+ */
+export function resolveRecognitionLanguage(preferred?: string): string {
+  const language = preferred ?? "en";
+  if (language === "si" || language === "ta") return "en";
+  return language;
+}
+
 type SpeechRecognitionCtor = new () => any;
 
 function recognitionCtor(): SpeechRecognitionCtor | null {
@@ -44,8 +103,42 @@ export function speechSupported(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
+if (typeof window !== "undefined" && speechSupported()) {
+  void loadVoices();
+}
+
 export interface Listener {
   stop: () => void;
+}
+
+function micErrorMessage(error: DOMException): string {
+  if (error.name === "NotAllowedError") {
+    return "Microphone access was blocked. Allow it in your browser settings.";
+  }
+  if (error.name === "NotFoundError") {
+    return "No microphone was found on this device.";
+  }
+  if (error.name === "NotReadableError") {
+    return "Your microphone is in use by another app. Close it and try again.";
+  }
+  return "Could not access your microphone.";
+}
+
+function recognitionErrorMessage(code: string): string {
+  switch (code) {
+    case "not-allowed":
+      return "Microphone access was blocked. Allow it in your browser settings.";
+    case "network":
+      return "Voice input needs an internet connection. Chrome sends audio to Google to transcribe it.";
+    case "service-not-allowed":
+      return "Voice input only works on secure pages. Open SuwaPath in Chrome or Safari.";
+    case "audio-capture":
+      return "Could not capture audio. Check that a microphone is connected and allowed.";
+    case "language-not-supported":
+      return "Your language is not supported for voice input here. Try English or type instead.";
+    default:
+      return "Speech recognition failed. Use Chrome or Safari with microphone access, or type instead.";
+  }
 }
 
 /**
@@ -58,6 +151,19 @@ export function listen(options: {
   language?: string;
   onPartial?: (text: string) => void;
   onFinal: (text: string) => void;
+  /**
+   * Each completed sentence, as it lands, rather than the whole session at
+   * the end.
+   *
+   * `onFinal` is right for dictation: it fires once, when the patient stops,
+   * and hands over a transcript they are about to review in an input box. It
+   * is useless to a listener that is waiting to hear one particular sentence,
+   * because "I can't breathe" would sit in the buffer until the session
+   * closed. Both are delivered from the same recognition session so nothing
+   * has to run two microphones.
+   */
+  onUtterance?: (text: string) => void;
+  onStart?: () => void;
   onError?: (message: string) => void;
   onEnd?: () => void;
 }): Listener | null {
@@ -65,47 +171,122 @@ export function listen(options: {
   if (!Ctor) return null;
 
   const recognition = new Ctor();
-  recognition.lang = LANG_TAGS[options.language ?? "en"] ?? LANG_TAGS.en;
+  recognition.lang =
+    LANG_TAGS[resolveRecognitionLanguage(options.language)] ?? LANG_TAGS.en;
   recognition.interimResults = true;
-  recognition.continuous = false;
+  // Keep the session open until the patient taps stop. Chrome still ends
+  // sessions after silence, so `onend` restarts while the mic is active.
+  recognition.continuous = true;
   recognition.maxAlternatives = 1;
 
-  let finalText = "";
+  let sessionText = "";
+  let active = true;
+  let manualStop = false;
+  let started = false;
+  let noSpeechCount = 0;
+  let stream: MediaStream | null = null;
 
-  recognition.onresult = (event: any) => {
-    let interim = "";
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const result = event.results[i];
-      if (result.isFinal) finalText += result[0].transcript;
-      else interim += result[0].transcript;
-    }
-    options.onPartial?.((finalText + interim).trim());
+  const releaseMic = () => {
+    stream?.getTracks().forEach((track) => track.stop());
+    stream = null;
   };
 
-  recognition.onerror = (event: any) => {
-    // `no-speech` and `aborted` are ordinary outcomes of someone changing
-    // their mind, not failures worth showing an error for.
-    if (event.error === "no-speech" || event.error === "aborted") return;
-    options.onError?.(
-      event.error === "not-allowed"
-        ? "Microphone access was blocked. Allow it in your browser settings."
-        : "Speech recognition failed. You can type instead.",
-    );
-  };
-
-  recognition.onend = () => {
-    const text = finalText.trim();
+  const finish = () => {
+    if (!active) return;
+    active = false;
+    releaseMic();
+    const text = sessionText.trim();
     if (text) options.onFinal(text);
     options.onEnd?.();
   };
 
-  try {
-    recognition.start();
-  } catch {
-    return null;
+  recognition.onresult = (event: any) => {
+    noSpeechCount = 0;
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const result = event.results[i];
+      const transcript = result[0].transcript;
+      if (result.isFinal) {
+        sessionText += `${transcript} `;
+        const utterance = transcript.trim();
+        if (utterance) options.onUtterance?.(utterance);
+      } else interim += transcript;
+    }
+    options.onPartial?.((sessionText + interim).trim());
+  };
+
+  recognition.onerror = (event: any) => {
+    if (event.error === "aborted") return;
+    if (event.error === "no-speech") {
+      noSpeechCount += 1;
+      if (noSpeechCount >= 2 && !sessionText.trim()) {
+        options.onError?.(
+          "Didn't catch anything. Speak closer to the mic, or type your message instead.",
+        );
+      }
+      return;
+    }
+    options.onError?.(recognitionErrorMessage(event.error));
+    manualStop = true;
+    finish();
+  };
+
+  recognition.onend = () => {
+    if (manualStop || !active) {
+      finish();
+      return;
+    }
+    // Chrome stops after silence even with continuous:true — restart until
+    // the patient taps stop.
+    try {
+      recognition.start();
+    } catch {
+      finish();
+    }
+  };
+
+  const startRecognition = () => {
+    if (!active || started) return;
+    try {
+      recognition.start();
+      started = true;
+      options.onStart?.();
+    } catch {
+      options.onError?.("Could not start voice input. Try again or type instead.");
+      manualStop = true;
+      finish();
+    }
+  };
+
+  if (navigator.mediaDevices?.getUserMedia) {
+    void navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((mediaStream) => {
+        if (!active) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        stream = mediaStream;
+        startRecognition();
+      })
+      .catch((error: DOMException) => {
+        options.onError?.(micErrorMessage(error));
+        manualStop = true;
+        finish();
+      });
+  } else {
+    startRecognition();
   }
 
-  return { stop: () => recognition.stop() };
+  return {
+    stop: () => {
+      manualStop = true;
+      try {
+        recognition.stop();
+      } catch {
+        finish();
+      }
+    },
+  };
 }
 
 /**
@@ -133,13 +314,7 @@ export interface SpeakOptions {
 /** Is there a voice installed that can actually pronounce this language? */
 export function voiceFor(language: string): SpeechSynthesisVoice | null {
   if (!speechSupported()) return null;
-  const tag = LANG_TAGS[language] ?? LANG_TAGS.en;
-  const voices = window.speechSynthesis.getVoices();
-  return (
-    voices.find((v) => v.lang === tag)
-    ?? voices.find((v) => v.lang.startsWith(tag.split("-")[0]))
-    ?? null
-  );
+  return pickVoice(window.speechSynthesis.getVoices(), language);
 }
 
 export function speak(markdown: string, options: SpeakOptions | string = {}): void {
@@ -147,7 +322,6 @@ export function speak(markdown: string, options: SpeakOptions | string = {}): vo
   // language string, so both are accepted rather than breaking them.
   const opts: SpeakOptions =
     typeof options === "string" ? { language: options } : options;
-  const language = opts.language ?? "en";
 
   if (!speechSupported()) {
     opts.onUnavailable?.();
@@ -157,25 +331,33 @@ export function speak(markdown: string, options: SpeakOptions | string = {}): vo
   const text = stripMarkdown(markdown);
   if (!text) return;
 
-  const match = voiceFor(language);
-  if (!match && language !== "en") {
-    opts.onUnavailable?.();
-    return;
-  }
+  const language = resolveSpeakLanguage(text, opts.language ?? "en");
 
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = LANG_TAGS[language] ?? LANG_TAGS.en;
-  utterance.rate = 0.97;
-  if (match) utterance.voice = match;
+  void loadVoices().then((voices) => {
+    const match = pickVoice(voices, language);
+    if (!match && language !== "en") {
+      opts.onUnavailable?.();
+      return;
+    }
 
-  utterance.onstart = () => opts.onStart?.();
-  utterance.onend = () => opts.onEnd?.();
-  // Not every engine emits boundary events. The avatar therefore treats
-  // these as a bonus for accuracy, never as its only source of animation.
-  utterance.onboundary = () => opts.onBoundary?.();
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = LANG_TAGS[language] ?? LANG_TAGS.en;
+    utterance.rate = 0.97;
+    if (match) utterance.voice = match;
 
-  window.speechSynthesis.speak(utterance);
+    utterance.onstart = () => opts.onStart?.();
+    utterance.onend = () => opts.onEnd?.();
+    utterance.onerror = () => {
+      opts.onEnd?.();
+      opts.onUnavailable?.();
+    };
+    // Not every engine emits boundary events. The avatar therefore treats
+    // these as a bonus for accuracy, never as its only source of animation.
+    utterance.onboundary = () => opts.onBoundary?.();
+
+    window.speechSynthesis.speak(utterance);
+  });
 }
 
 export function stopSpeaking(): void {

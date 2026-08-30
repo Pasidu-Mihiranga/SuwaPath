@@ -75,6 +75,36 @@ export const FIRST_AID: FirstAidScript[] = [
     ],
   },
   {
+    rules: ["RF-NEURO-003"],
+    title: "While you wait — a sudden, worst-ever headache",
+    steps: [
+      `Call ${AMBULANCE} now and say the headache came on suddenly.`,
+      "Note the exact time it started, and whether it reached its worst within seconds or minutes.",
+      "Lie still somewhere dark and quiet, with the head slightly raised.",
+      "Someone should stay and keep watching how awake and alert you are.",
+    ],
+    avoid: [
+      "Do not drive yourself.",
+      "Do not wait to see whether it eases off.",
+      "Do not eat or drink in case you become drowsy.",
+    ],
+  },
+  {
+    rules: ["RF-NEURO-002"],
+    title: "While you wait — fever with a stiff neck",
+    steps: [
+      `Call ${AMBULANCE} now and say there is fever with a stiff neck.`,
+      "Note the time the fever and the neck stiffness started.",
+      "Keep them lying down somewhere dim and quiet — bright light often hurts.",
+      "Stay with them and keep checking that they are awake and answering you.",
+      "If the ambulance is delayed, go straight to the nearest emergency department.",
+    ],
+    avoid: [
+      "Do not wait to see whether the fever comes down.",
+      "Do not give food or drink if they are drowsy.",
+    ],
+  },
+  {
     rules: ["RF-NEURO-004", "RF-PAED-001"],
     title: "While you wait — a fit or convulsion",
     steps: [

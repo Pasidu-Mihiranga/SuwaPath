@@ -17,6 +17,7 @@ import { Avatar, Brand } from "./ui";
 import { api } from "../lib/api";
 import { useAuth, type Role } from "../lib/auth";
 import ChatFab from "./ChatFab";
+import EmergencyListener from "./Emergency/EmergencyListener";
 
 interface NavItem {
   to: string;
@@ -577,6 +578,12 @@ export default function AppShell() {
       {/* Floating chat assistant shortcut — visible on every page except
           the Assistant itself. The component checks role and route. */}
       <ChatFab />
+
+      {/* Hands-free emergency listening. Mounted here rather than on a page so
+          that arming it survives navigation — a listener that switched itself
+          off when the patient opened their reports would be worse than none,
+          because they would still believe it was on. */}
+      <EmergencyListener />
     </div>
   );
 }

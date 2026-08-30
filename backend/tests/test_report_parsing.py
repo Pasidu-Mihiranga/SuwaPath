@@ -205,6 +205,27 @@ def both_reading_engines_are_exercised() -> list[str]:
     return [f"never exercised: {', '.join(sorted(missing))}"] if missing else []
 
 
+def stacked_pdf_table_layout_parses() -> list[str]:
+    """PDFs whose text layer emits one table cell per line must still parse."""
+    failures: list[str] = []
+    text = (
+        "CLINICAL LABORATORY REPORT\nPatient ID:\n"
+        "e4b29c9a-1d54-4a22-9e8c-8d1a3c6f4b9dDate Collected:\n2026-08-30\n"
+        "Test Parameter\nResult\nUnit\nReference Range\nFlag\n"
+        "White Blood Cell (WBC)  7.2  10³/µL  4.5 - 11.0  Normal\n"
+        "Hemoglobin (Hb)  14.8  g/dL  13.5 - 17.5  Normal\n"
+        "Platelet Count  245  10³/µL  150 - 450  Normal\n"
+    )
+    values, _ = parse_values(text)
+    if any("e4b29c9a" in v.test_name for v in values):
+        failures.append("patient UUID was parsed as a test name")
+    names = {v.test_name.lower() for v in values}
+    for expected in ("white blood cell (wbc)", "hemoglobin (hb)", "platelet count"):
+        if expected not in names:
+            failures.append(f"missing expected row {expected!r}")
+    return failures
+
+
 CHECKS = (
     ("Real reports still parse", real_reports_still_parse),
     ("Document metadata is not listed as a result", document_metadata_is_not_a_result),
@@ -212,6 +233,7 @@ CHECKS = (
     ("Unitless analytes are not dropped", unitless_analytes_survive),
     ("Non-reports make no clinical claim", non_reports_make_no_clinical_claim),
     ("Both reading engines are exercised", both_reading_engines_are_exercised),
+    ("Stacked PDF table rows parse", stacked_pdf_table_layout_parses),
 )
 
 
@@ -255,6 +277,10 @@ def test_non_reports_make_no_clinical_claim() -> None:
 
 def test_both_reading_engines_are_exercised() -> None:
     assert both_reading_engines_are_exercised() == []
+
+
+def test_stacked_pdf_table_layout_parses() -> None:
+    assert stacked_pdf_table_layout_parses() == []
 
 
 if __name__ == "__main__":

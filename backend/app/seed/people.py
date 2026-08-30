@@ -194,8 +194,8 @@ def seed_doctors(
             db.add(doctor)
             db.flush()
 
-            # The fixed demo doctor gets full weekday coverage so their live
-            # queue is never empty on the day of a demo, whatever weekday it is.
+            # The fixed demo doctor gets full-week coverage (including Sunday)
+            # so their live queue is never empty on the day of a demo.
             _add_schedules(
                 db, rng, doctor, hospital, full_week=email == "doctor@suwapath.lk"
             )
@@ -215,7 +215,7 @@ def _add_schedules(
 ) -> None:
     """Give each doctor 3-5 weekly clinic blocks, plus optional tele sessions."""
     working_days = (
-        list(range(0, 6)) if full_week else rng.sample(range(0, 6), rng.randint(3, 5))
+        list(range(0, 7)) if full_week else rng.sample(range(0, 6), rng.randint(3, 5))
     )
     for day in working_days:
         morning = True if full_week else rng.random() < 0.7

@@ -54,6 +54,17 @@ export interface DoctorAvatarProps {
   /** Who is speaking, when a doctor sent this rather than the engine. */
   speakerName?: string;
   autoSpeak?: boolean;
+  /**
+   * Read the first-aid steps out too, and show them, without being asked.
+   *
+   * Normally "What to do now" is a button, because most people who see this
+   * card can read it and choosing to be talked at is theirs to make. The
+   * hands-free path is the case where that assumption fails: nobody tapped
+   * anything to get here, and the reason the listener fired may be that the
+   * patient's hands are busy holding a wound closed. Reserved for that path —
+   * anywhere a patient could have tapped, they should have to.
+   */
+  autoFirstAid?: boolean;
   onDismiss?: () => void;
 }
 
@@ -181,18 +192,20 @@ export default function DoctorAvatar({
   // nuisance that gets muted — and then it is not there for the turn that
   // mattered. The button is always visible; the speech is the patient's call.
   autoSpeak = variant === "emergency",
+  autoFirstAid = false,
   onDismiss,
 }: DoctorAvatarProps) {
   const [state, setState] = useState<State>("idle");
   const [mouth, setMouth] = useState(0);
   const [noVoice, setNoVoice] = useState(false);
-  const [showAid, setShowAid] = useState(false);
+  const [aidRequested, setAidRequested] = useState(false);
   const timer = useRef<number | null>(null);
   const started = useRef(false);
 
   const reducedMotion = usePrefersReducedMotion();
   const mood: Mood = urgency === "emergency" || urgency === "urgent" ? "urgent" : "calm";
   const script: FirstAidScript | null = scriptForRules(ruleIds);
+  const showAid = aidRequested || (autoFirstAid && script !== null);
 
   const stopMouth = useCallback(() => {
     if (timer.current !== null) {
@@ -238,11 +251,17 @@ export default function DoctorAvatar({
   useEffect(() => {
     if (!autoSpeak || started.current) return;
     started.current = true;
+    // Spoken as one utterance rather than two queued ones. Chaining a second
+    // `speak()` off the first's `onEnd` drops the tail on engines that fire
+    // `onend` early, and losing the half that says what to do about it is
+    // worse than a slightly long sentence.
+    const opening =
+      autoFirstAid && script ? `${message} ${spokenForm(script)}` : message;
     // Voices load asynchronously in most browsers; asking immediately often
     // finds an empty list and wrongly concludes the language is unsupported.
-    const t = window.setTimeout(() => say(message), 220);
+    const t = window.setTimeout(() => say(opening), 220);
     return () => window.clearTimeout(t);
-  }, [autoSpeak, message, say]);
+  }, [autoSpeak, autoFirstAid, message, say, script]);
 
   useEffect(() => () => {
     voice.stopSpeaking();
@@ -290,8 +309,9 @@ export default function DoctorAvatar({
 
           {noVoice && (
             <p className="mt-2 rounded-lg bg-canvas px-2.5 py-1.5 text-xs text-ink-600">
-              Your device has no voice installed for this language, so this is
-              shown as text only.
+              {voice.speechSupported()
+                ? "Your device has no voice installed for this language, so this is shown as text only. Try Chrome or Safari, or switch your language to English in profile settings."
+                : "Your browser does not support read-aloud. Try Chrome or Safari, or read the message above."}
             </p>
           )}
 
@@ -309,7 +329,7 @@ export default function DoctorAvatar({
               <button
                 type="button"
                 onClick={() => {
-                  setShowAid(true);
+                  setAidRequested(true);
                   say(spokenForm(script));
                 }}
                 className="sp-btn sp-btn-primary !py-1.5 text-xs"

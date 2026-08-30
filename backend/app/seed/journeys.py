@@ -13,6 +13,7 @@ from __future__ import annotations
 import random
 from datetime import date, datetime, time, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -22,6 +23,7 @@ from app.models import (
     Consultation,
     DailyCheckIn,
     Doctor,
+    DoctorSchedule,
     ElderlyRecord,
     GuardianAlert,
     Hospital,
@@ -197,6 +199,7 @@ def seed_appointments(
 
     _assign_outcomes(rng, appointments, patients)
     _pin_demo_appointments(rng, appointments, doctors, demo or {})
+    ensure_demo_doctor_today_queue(db, demo, appointments=appointments)
 
     db.add_all(appointments)
     db.flush()
@@ -268,6 +271,154 @@ DEMO_APPOINTMENTS: dict[str, tuple[tuple[str, ...], str]] = {
     "postpartum": (("obstetrics_gynaecology",), "Postnatal review and feeding support"),
     "elderly": (("cardiology", "general_medicine"), "Blood pressure and dizziness review"),
 }
+
+# Demo patients pinned to the demo doctor's *today* queue so the live dashboard
+# is never empty on the day of a review — including Sundays, when most
+# doctors in the dataset do not clinic.
+DEMO_DOCTOR_QUEUE: list[tuple[str, str, UrgencyLevel, AppointmentStatus]] = [
+    ("patient", "Follow-up: thyroid review", UrgencyLevel.ROUTINE, AppointmentStatus.CONFIRMED),
+    ("elderly", "Blood pressure and dizziness review", UrgencyLevel.URGENT, AppointmentStatus.CHECKED_IN),
+    ("maternal", "Persistent fatigue and dizziness", UrgencyLevel.ROUTINE, AppointmentStatus.CONFIRMED),
+    ("postpartum", "Follow-up: diabetes management", UrgencyLevel.ROUTINE, AppointmentStatus.PENDING),
+]
+DEMO_DOCTOR_QUEUE_TIMES = [time(9, 0), time(9, 30), time(10, 0), time(10, 30)]
+DEMO_DOCTOR_EMAIL = "doctor@suwapath.lk"
+DEMO_PATIENT_EMAILS = {
+    "patient": "patient@suwapath.lk",
+    "maternal": "maternal@suwapath.lk",
+    "postpartum": "postpartum@suwapath.lk",
+    "elderly": "elderly@suwapath.lk",
+}
+
+
+def _day_bounds(day: date) -> tuple[datetime, datetime]:
+    return (
+        datetime.combine(day, time.min, tzinfo=timezone.utc),
+        datetime.combine(day, time.max, tzinfo=timezone.utc),
+    )
+
+
+def _ensure_demo_doctor_sunday_schedule(db: Session, doctor: Doctor) -> None:
+    if any(s.day_of_week == 6 and s.is_active for s in doctor.schedules):
+        return
+    for start, end in ((time(8, 0), time(12, 30)), (time(14, 0), time(17, 30))):
+        db.add(
+            DoctorSchedule(
+                doctor_id=doctor.id,
+                hospital_id=doctor.hospital_id,
+                day_of_week=6,
+                start_time=start,
+                end_time=end,
+                slot_duration_minutes=20,
+                visit_type=str(VisitType.PHYSICAL),
+                max_patients=12,
+            )
+        )
+    db.flush()
+
+
+def _resolve_demo_patients(
+    db: Session, demo: dict[str, User] | None
+) -> dict[str, User]:
+    if demo:
+        return demo
+    resolved: dict[str, User] = {}
+    for key, email in DEMO_PATIENT_EMAILS.items():
+        user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
+        if user is not None:
+            resolved[key] = user
+    return resolved
+
+
+def ensure_demo_doctor_today_queue(
+    db: Session,
+    demo: dict[str, User] | None = None,
+    *,
+    appointments: list[Appointment] | None = None,
+) -> int:
+    """Guarantee the demo doctor has patients in today's live queue.
+
+    Safe to call after seeding or on a live database: skips when the queue
+    already has enough patients for today.
+    """
+    doctor_user = db.execute(
+        select(User).where(User.email == DEMO_DOCTOR_EMAIL)
+    ).scalar_one_or_none()
+    if doctor_user is None or doctor_user.doctor_profile is None:
+        return 0
+
+    doctor = doctor_user.doctor_profile
+    _ensure_demo_doctor_sunday_schedule(db, doctor)
+
+    today = datetime.now(timezone.utc).date()
+    start, end = _day_bounds(today)
+
+    if appointments is not None:
+        existing = [
+            a
+            for a in appointments
+            if a.doctor_id == doctor.id
+            and start <= a.scheduled_start <= end
+            and str(a.status) != AppointmentStatus.CANCELLED
+        ]
+    else:
+        existing = db.execute(
+            select(Appointment).where(
+                Appointment.doctor_id == doctor.id,
+                Appointment.scheduled_start >= start,
+                Appointment.scheduled_start <= end,
+                Appointment.status != str(AppointmentStatus.CANCELLED),
+            )
+        ).scalars().all()
+
+    if len(existing) >= len(DEMO_DOCTOR_QUEUE):
+        return 0
+
+    patients = _resolve_demo_patients(db, demo)
+    now = datetime.now(timezone.utc)
+    created: list[Appointment] = []
+
+    for index, (key, complaint, urgency, status) in enumerate(DEMO_DOCTOR_QUEUE):
+        patient = patients.get(key)
+        if patient is None:
+            continue
+
+        slot_time = DEMO_DOCTOR_QUEUE_TIMES[index % len(DEMO_DOCTOR_QUEUE_TIMES)]
+        slot_start = _utc(today, slot_time)
+        slot_end = slot_start + timedelta(minutes=20)
+        booked_at = now - timedelta(days=3 + index, hours=2)
+
+        appointment = Appointment(
+            patient_user_id=patient.id,
+            doctor_id=doctor.id,
+            hospital_id=doctor.hospital_id,
+            scheduled_start=slot_start,
+            scheduled_end=slot_end,
+            visit_type=VisitType.PHYSICAL,
+            urgency=urgency,
+            reason=complaint,
+            chief_complaint=complaint,
+            fee_lkr=doctor.consultation_fee_lkr,
+            booked_at=booked_at,
+            confirmed_at=booked_at + timedelta(hours=4),
+            status=status,
+            patient_distance_km=8.5,
+        )
+        if status == AppointmentStatus.CHECKED_IN:
+            appointment.checked_in_at = slot_start - timedelta(minutes=12)
+        elif status == AppointmentStatus.IN_CONSULTATION:
+            appointment.checked_in_at = slot_start - timedelta(minutes=10)
+            appointment.started_at = slot_start
+
+        created.append(appointment)
+
+    if appointments is not None:
+        appointments.extend(created)
+    else:
+        db.add_all(created)
+        db.commit()
+
+    return len(created)
 
 
 def _pin_demo_appointments(

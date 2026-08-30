@@ -14,6 +14,7 @@ frontend/.npm-cache/
 # Environment
 .env
 .env.local
+*.pem
 
 # Runtime storage (uploads, generated heatmaps, local Qdrant index)
 backend/storage/documents/*
