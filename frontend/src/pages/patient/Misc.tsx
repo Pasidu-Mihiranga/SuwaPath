@@ -425,14 +425,14 @@ export function Notifications() {
           (n: any) => n.category === "doctor_message" && !n.is_read,
         );
         if (!fromDoctor) return null;
-        const body = [fromDoctor.title, fromDoctor.body].filter(Boolean).join(". ");
+        const speakerMatch = /^Message from (.+)$/i.exec(fromDoctor.title ?? "");
         return (
           <DoctorAvatar
             variant="doctor"
-            message={body}
-            // The notification payload carries no sender name, so the
-            // component's neutral heading stands rather than inventing one.
+            message={fromDoctor.body || fromDoctor.title}
+            speakerName={speakerMatch?.[1]}
             language={language}
+            autoSpeak
             onDismiss={async () => {
               await api.post(`/notifications/${fromDoctor.id}/read`);
               await load();

@@ -175,12 +175,42 @@ def _read_pdf(path: Path) -> tuple[str, int, float, str]:
                 logger.warning("Page OCR failed: %s", exc)
         pages_text.append(text)
 
-    doc.close()
     full_text = "\n".join(pages_text)
+    # Plain get_text() often emits one table cell per line when columns are
+    # laid out spatially. find_tables() reconstructs the row layout the line
+    # parser expects.
+    table_text = _extract_pdf_table_text(doc)
+    doc.close()
+    if table_text.strip():
+        full_text = f"{full_text}\n{table_text}"
     engine = "tesseract" if used_ocr else "pymupdf-textlayer"
     # A native text layer is exact; OCR confidence is estimated below.
     confidence = 0.99 if not used_ocr else _estimate_confidence(full_text)
     return full_text, page_count, confidence, engine
+
+
+def _extract_pdf_table_text(doc) -> str:
+    """Turn PDF layout tables into double-spaced rows for the line parser."""
+    lines: list[str] = []
+    try:
+        for page in doc:
+            for table in page.find_tables().tables:
+                for row in table.extract():
+                    if not row or not any(cell and str(cell).strip() for cell in row):
+                        continue
+                    first = str(row[0] or "").strip()
+                    if first.lower() in _TABLE_HEADER_LABELS:
+                        continue
+                    line = "  ".join(
+                        str(cell or "").strip()
+                        for cell in row
+                        if cell and str(cell).strip()
+                    )
+                    if line:
+                        lines.append(line)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PDF table extraction failed: %s", exc)
+    return "\n".join(lines)
 
 
 def _read_image(path: Path) -> tuple[str, int, float, str]:
@@ -222,7 +252,16 @@ _RANGE_PATTERNS = [
 ]
 _UNIT_PATTERN = re.compile(
     r"\b(g/dL|g/dl|mg/dL|mg/dl|mmol/L|mIU/L|µIU/mL|uIU/mL|ng/dL|ng/mL|pg/mL|"
-    r"IU/mL|U/L|mm/hr|mg/L|%|/µL|/uL|cells/µL|10\^3/µL|x10\^9/L|µg/dL|ug/dL)\b"
+    r"IU/mL|U/L|mm/hr|mg/L|fL|pg|%|/µL|/uL|cells/µL|10\^3/µL|10³/µL|10 /µL|"
+    r"x10\^9/L|µg/dL|ug/dL)\b"
+)
+# Hex digit runs separated by spaces or hyphens — patient/sample IDs, not analytes.
+_UUID_FRAGMENT = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_TABLE_HEADER_LABELS = frozenset(
+    {"test parameter", "test", "investigation", "parameter", "analyte", "result"}
 )
 
 
@@ -274,6 +313,8 @@ def _parse_line(line: str, row_index: int) -> ParsedValue | None:
         return None
     # A line that is mostly digits is not an analyte row.
     if sum(c.isalpha() for c in name) < 2:
+        return None
+    if _looks_like_hex_identifier(name):
         return None
 
     result_numeric = _to_float(result_text)
@@ -530,6 +571,69 @@ _DATE_PATTERN = re.compile(
 )
 
 
+def _looks_like_hex_identifier(name: str) -> bool:
+    """Whether a label is a UUID or other hex identifier, not an analyte name."""
+    if _UUID_FRAGMENT.match(name.strip()):
+        return True
+    lowered = name.lower()
+    # Analyte names use letters outside the hex alphabet (g-z).
+    if sum(1 for char in lowered if char.isalpha() and char not in "abcdef") >= 3:
+        return False
+    hex_tokens = re.findall(r"[0-9a-f]+", lowered)
+    return len(hex_tokens) >= 3 and sum(len(token) for token in hex_tokens) >= 12
+
+
+def _dedupe_parsed_values(values: list[ParsedValue]) -> list[ParsedValue]:
+    """Drop UUID false positives; when the same test appears twice, keep the richer row."""
+    cleaned = [
+        v for v in values
+        if not _looks_like_hex_identifier(v.test_name)
+        and not _UUID_FRAGMENT.match(v.test_name.strip())
+    ]
+    best_by_name: dict[str, ParsedValue] = {}
+    for value in cleaned:
+        key = value.test_name.lower()
+        current = best_by_name.get(key)
+        if current is None or _parsed_value_quality(value) > _parsed_value_quality(current):
+            best_by_name[key] = value
+    seen: set[str] = set()
+    deduped: list[ParsedValue] = []
+    for index, value in enumerate(cleaned):
+        key = value.test_name.lower()
+        if key in seen or best_by_name[key] is not value:
+            continue
+        seen.add(key)
+        deduped.append(
+            ParsedValue(
+                test_name=value.test_name,
+                normalised_name=value.normalised_name,
+                result_text=value.result_text,
+                result_numeric=value.result_numeric,
+                unit=value.unit,
+                reference_range_text=value.reference_range_text,
+                reference_low=value.reference_low,
+                reference_high=value.reference_high,
+                reference_source=value.reference_source,
+                flag=value.flag,
+                row_index=len(deduped),
+            )
+        )
+    return deduped
+
+
+def _parsed_value_quality(value: ParsedValue) -> int:
+    score = 0
+    if value.unit:
+        score += 2
+    if value.normalised_name:
+        score += 2
+    if value.reference_range_text:
+        score += 1
+    if value.result_numeric is not None:
+        score += 1
+    return score
+
+
 def extract_metadata(text: str) -> dict:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     metadata: dict = {
@@ -589,6 +693,14 @@ def classify_document(text: str) -> DocumentType:
 def extract_document(path: Path, mime_type: str) -> ExtractionResult:
     text, page_count, confidence, engine = read_document(path, mime_type)
     values, tables = parse_values(text)
+    # When table reconstruction appended rows, plain-text lines may still parse
+    # into junk (e.g. a patient UUID split across tokens). Prefer the richer
+    # table-derived set and drop UUID-shaped false positives either way.
+    values = _dedupe_parsed_values(values)
+    tables = [
+        row for row in tables
+        if not _looks_like_hex_identifier(row.get("test", ""))
+    ]
     metadata = extract_metadata(text)
 
     # Read fine, but it is not a report. Presenting rows parsed out of an

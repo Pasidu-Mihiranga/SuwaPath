@@ -359,14 +359,21 @@ export default function Assistant() {
   function toggleListening() {
     if (listening) {
       listenerRef.current?.stop();
+      setListening(false);
+      listenerRef.current = null;
       return;
     }
     setError(null);
     const handle = voice.listen({
       language: user?.preferred_language ?? "en",
+      onStart: () => setListening(true),
       onPartial: setInput,
       onFinal: setInput,
-      onError: setError,
+      onError: (message) => {
+        setError(message);
+        setListening(false);
+        listenerRef.current = null;
+      },
       onEnd: () => {
         setListening(false);
         listenerRef.current = null;
@@ -377,7 +384,6 @@ export default function Assistant() {
       return;
     }
     listenerRef.current = handle;
-    setListening(true);
   }
 
   useEffect(() => () => {

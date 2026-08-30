@@ -214,6 +214,7 @@ export default function ChatFab() {
   // Voice & Upload states
   const [uploading, setUploading] = useState(false);
   const [listening, setListening] = useState(false);
+  const [startingMic, setStartingMic] = useState(false);
   const [attachMode, setAttachMode] = useState<AttachMode>("file");
 
   const endRef = useRef<HTMLDivElement>(null);
@@ -280,25 +281,38 @@ export default function ChatFab() {
   function toggleListening() {
     if (listening) {
       listenerRef.current?.stop();
+      setListening(false);
+      listenerRef.current = null;
       return;
     }
     setError(null);
+    setStartingMic(true);
     const handle = voice.listen({
       language: user?.preferred_language ?? "en",
+      onStart: () => {
+        setStartingMic(false);
+        setListening(true);
+      },
       onPartial: setInput,
       onFinal: setInput,
-      onError: setError,
+      onError: (message) => {
+        setError(message);
+        setListening(false);
+        setStartingMic(false);
+        listenerRef.current = null;
+      },
       onEnd: () => {
         setListening(false);
+        setStartingMic(false);
         listenerRef.current = null;
       },
     });
     if (!handle) {
+      setStartingMic(false);
       setError("Voice input not supported in your browser.");
       return;
     }
     listenerRef.current = handle;
-    setListening(true);
   }
 
   async function uploadFile(file: File) {
@@ -611,11 +625,23 @@ export default function ChatFab() {
                 <button
                   type="button"
                   onClick={toggleListening}
-                  disabled={busy || uploading}
-                  aria-label={listening ? "Stop dictating" : "Dictate a message"}
-                  title={listening ? "Stop dictating" : "Dictate a message"}
-                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border transition ${
+                  disabled={busy || uploading || startingMic}
+                  aria-label={
                     listening
+                      ? "Stop dictating"
+                      : startingMic
+                        ? "Starting microphone"
+                        : "Dictate a message"
+                  }
+                  title={
+                    listening
+                      ? "Stop dictating"
+                      : startingMic
+                        ? "Starting microphone…"
+                        : "Dictate a message"
+                  }
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border transition ${
+                    listening || startingMic
                       ? "animate-pulse border-danger-border bg-danger-surface text-danger-text"
                       : "border-line bg-surface text-ink-600 hover:border-brand-400 hover:text-brand-700"
                   }`}
@@ -628,11 +654,13 @@ export default function ChatFab() {
                 ref={inputRef}
                 className="sp-input flex-1 min-w-0 !h-9 !rounded-full !text-xs sm:!text-sm"
                 placeholder={
-                  listening
-                    ? "Listening…"
-                    : isPrivate
-                      ? "Private chat mode…"
-                      : "Describe a symptom or report…"
+                  startingMic
+                    ? "Starting microphone…"
+                    : listening
+                      ? "Speak now — tap mic to stop"
+                      : isPrivate
+                        ? "Private chat mode…"
+                        : "Describe a symptom or report…"
                 }
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
