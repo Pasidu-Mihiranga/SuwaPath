@@ -37,6 +37,7 @@ LEXICON: dict[str, list[str]] = {
         "cannot breathe", "cannot breath", "unable to breathe", "can not breathe",
         "struggling to breathe", "struggling for breath", "fighting for breath",
         "gasping for air", "cant get air", "can't get air", "cannot get air",
+        "barely breathe", "can barely breathe", "hardly breathe",
         "හුස්ම ගැනීමේ අපහසුතාව", "husma ganna amaruyi", "husma", "மூச்சுத் திணறல்",
         "moochu thinaral",
     ],
@@ -49,8 +50,10 @@ LEXICON: dict[str, list[str]] = {
         "sweaty", "දහඩිය", "dahadiya", "வியர்வை", "viyarvai",
     ],
     "radiating_pain": [
-        "pain spreads", "spreading to arm", "radiating", "pain in left arm",
-        "pain to jaw", "pain going to my arm", "shoulder and arm pain",
+        "pain spreads", "spreading to arm", "spreading to my arm", "spreading to left arm",
+        "spreading to my left arm", "spreading to the left arm", "radiating to my arm",
+        "radiating to left arm", "radiating to my left arm", "radiating to arm", "radiating",
+        "pain in left arm", "pain to jaw", "pain going to my arm", "shoulder and arm pain",
         # Said aloud, radiation is described as direction of travel rather
         # than with the word "radiating": "the pain is going down my left
         # arm". This concept never fires a rule on its own — it only upgrades
@@ -59,7 +62,7 @@ LEXICON: dict[str, list[str]] = {
         "going down my arm", "going down my left arm", "down my left arm",
         "down the left arm", "going into my jaw", "into my jaw", "up to my jaw",
         "pain in my left arm", "pain in my jaw", "pain in my shoulder and arm",
-        "spreading to my arm", "spreads to my arm", "moving to my arm",
+        "spreads to my arm", "moving to my arm",
         "අත දක්වා පැතිරෙන", "atha dakwa",
     ],
     "cough": [
@@ -67,7 +70,8 @@ LEXICON: dict[str, list[str]] = {
         "කැස්ස", "kassa", "இருமல்", "irumal",
     ],
     "coughing_blood": [
-        "coughing blood", "blood in sputum", "haemoptysis", "hemoptysis",
+        "coughing blood", "coughing up blood", "cough up blood", "coughed up blood",
+        "blood in sputum", "blood in phlegm", "haemoptysis", "hemoptysis",
         "blood when i cough", "ලේ කැස්ස", "le kassa",
     ],
     "wheezing": ["wheezing", "wheeze", "whistling breath", "asthma attack"],
@@ -174,6 +178,8 @@ LEXICON: dict[str, list[str]] = {
     ],
     "vomiting_blood": [
         "vomiting blood", "blood in vomit", "haematemesis", "hematemesis",
+        "vomited blood", "vomiting large amounts of blood",
+        "vomiting large amounts of bright red blood", "throwing up blood",
         "ලේ වමනය", "le wamanaya",
     ],
     "nausea": ["nausea", "nauseous", "feel sick", "queasy", "ඔක්කාරය", "okkaraya"],
@@ -239,6 +245,9 @@ LEXICON: dict[str, list[str]] = {
     ],
     "swelling": [
         "swelling", "swollen feet", "swollen hands", "swollen face", "puffiness",
+        "throat tightening", "throat is tightening", "throat tightening up", "throat is tightening up",
+        "throat swelling", "swelling in throat", "swelling of throat",
+        "lip swelling", "tongue swelling", "swollen tongue", "swollen lips",
         "oedema", "edema", "ඉදිමීම", "idimima", "வீக்கம்",
     ],
     "contractions": ["contractions", "labour pain", "labor pains", "regular pains"],

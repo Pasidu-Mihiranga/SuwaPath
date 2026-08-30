@@ -462,9 +462,27 @@ def run(
         "negated_concepts": sorted(red_flags.negated_concepts),
     }
 
-    # 2. An emergency ends question-asking. Nothing the patient could say next
-    #    would make it safe to keep interviewing them.
+    # 2. An emergency ends question-asking.
+    # If the patient has already received the primary emergency escalation,
+    # answer their specific follow-up question (e.g. comfort, painkiller caution)
+    # via the LLM while keeping emergency status active.
+    has_prior_escalation = any(
+        isinstance(m, dict)
+        and m.get("role") == "assistant"
+        and ("emergency care now" in (m.get("content") or "").lower() or "1990" in (m.get("content") or ""))
+        for m in messages[:-1]
+    )
+
     if red_flags.urgency == UrgencyLevel.EMERGENCY:
+        if has_prior_escalation:
+            turn = _escalate_followup(
+                state, patient_context, red_flags, recommendation, language
+            )
+            turn.coverage = state.coverage
+            turn.red_flags = red_flag_payload
+            turn.latency_ms = int((time.perf_counter() - started) * 1000)
+            return turn
+
         return ConsultTurn(
             mode="escalate",
             answer=_escalation_markdown(red_flags, recommendation),
@@ -738,6 +756,64 @@ Write your reply in {language_name}."""
 
     return ConsultTurn(
         mode="assess",
+        answer=answer,
+        urgency=str(red_flags.urgency),
+        specialty=recommendation.specialty_code,
+        specialty_name=recommendation.specialty_name,
+        tests=tests,
+        source=source,
+    )
+
+
+_EMERGENCY_FOLLOWUP_SYSTEM = """You are an experienced, compassionate Sri Lankan physician responding to a patient in an active medical emergency.
+
+The patient has already been advised to call 1990 (Suwa Seriya) or go immediately to an emergency department.
+
+Rules:
+- Directly and calmly answer their specific question (e.g. what they can/cannot do while waiting, medication cautions like pain killers, comfort positioning, staying calm).
+- If they ask about taking medications (like pain killers), advise extreme caution: do not take unprescribed drugs that could mask symptoms or thin blood before emergency evaluation.
+- Keep the tone calm, clear, and reassuring without downplaying the emergency.
+- Always remind them to stay resting and proceed with emergency care / 1990 without delay."""
+
+
+def _escalate_followup(
+    state: ConsultState,
+    patient_context: dict,
+    red_flags: rfe.RedFlagResult,
+    recommendation: navigation.NavigationResult,
+    language: str,
+) -> ConsultTurn:
+    language_name = {"en": "English", "si": "Sinhala", "ta": "Tamil"}.get(language, "English")
+    tests = recommendation.recommended_tests or []
+    flags = ", ".join(r.label for r in red_flags.triggered_rules) or "emergency pattern"
+
+    prompt = f"""Patient's latest message / question:
+\"\"\"{state.transcript[-600:]}\"\"\"
+
+Clinical Emergency Context:
+- Emergency condition flagged: {flags}
+- Primary directive: Call 1990 / Emergency Dept immediately
+- Suggested facility specialty: {recommendation.specialty_name}
+
+Answer the patient's specific question calmly, clearly, and safely in {language_name}."""
+
+    completion = llm.complete(
+        prompt, system=_EMERGENCY_FOLLOWUP_SYSTEM, temperature=0.3, max_tokens=600
+    )
+
+    if completion and completion.text.strip():
+        answer = completion.text.strip()
+        source = completion.provider
+    else:
+        answer = (
+            "**Please remain seated and resting while waiting for the 1990 ambulance.**\n\n"
+            "Do not take unprescribed pain killers or aspirin unless specifically instructed by the 1990 operator or attending emergency team, as they may complicate emergency assessment.\n\n"
+            + _escalation_markdown(red_flags, recommendation)
+        )
+        source = "deterministic"
+
+    return ConsultTurn(
+        mode="escalate",
         answer=answer,
         urgency=str(red_flags.urgency),
         specialty=recommendation.specialty_code,
