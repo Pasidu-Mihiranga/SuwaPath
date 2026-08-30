@@ -140,7 +140,7 @@ def cag_node(state: AgentState) -> dict:
 
     return {
         "answer": hit.answer,
-        "routes": [],
+        "routes": [{"route": "direct", "confidence": 1.0, "reasoning": "Product FAQ / Direct CAG match"}],
         "suggestions": hit.suggestions,
         "cag": {"hit": True, "key": hit.key, "kind": hit.kind, "score": hit.score},
         "trace": [{
@@ -192,10 +192,16 @@ def route_node(state: AgentState) -> dict:
         source = "keyword_fallback"
         routes = _fallback_routes(message)
 
-    mid_consultation = bool(history) and _awaiting_answer(history)
+    is_meta_or_direct = bool(re.search(
+        r"^(hi|hello|hey|what (can|do|type)|who are you|tell me about|what is suwa|how (can|do) you help|need your detail|your details|thank you|thanks|bye)\b",
+        message.strip(),
+        re.I
+    )) or (any(r["route"] == "direct" for r in routes) and not any(r["route"] == "consult" for r in routes))
 
-    # A reply to our own follow-up question always continues the consultation,
-    # whatever the classifier made of the fragment on its own.
+    mid_consultation = bool(history) and _awaiting_answer(history) and not is_meta_or_direct
+
+    # A reply to our own follow-up question continues the consultation only if
+    # the user is actually answering, not changing topic to a meta or direct query.
     if mid_consultation and not any(r["route"] == "consult" for r in routes):
         routes.insert(0, {
             "route": "consult",
@@ -328,7 +334,11 @@ _FALLBACK_KEYWORDS = [
              "right now", "recently", "2025", "2026")),
     ("consult", ("pain", "fever", "symptom", "hurt", "feel", "sick", "cough",
                  "dizzy", "headache", "bleeding", "rash", "breath", "ache",
-                 "vomit", "nausea", "swollen", "itch", "tired")),
+                 "vomit", "nausea", "swollen", "itch", "tired", "droop",
+                 "slur", "speech", "stroke", "seizure", "faint", "collapse",
+                 "unconscious", "tighten")),
+    ("direct", ("what is suwapath", "what is suwa", "who are you", "what can you do",
+                "what type of thing", "your detail", "your details", "hello", "hi", "help")),
     ("knowledge", ("what is", "what does", "why does", "how does", "explain",
                    "is it normal", "tell me about")),
 ]
@@ -371,6 +381,12 @@ _ASKING_POLICY = re.compile(
 def _fallback_routes(message: str) -> list[dict]:
     """Keyword multi-intent detection, used when no LLM router is available."""
     lowered = (message or "").lower()
+    if any(k in lowered for k in ("what is suwapath", "what is suwa", "who are you", "what can you do", "what type of thing", "tell me about yourself", "your detail", "your details")):
+        return [{
+            "route": "direct",
+            "confidence": 0.8,
+            "reasoning": "Asking about assistant identity or capabilities.",
+        }]
     if _ASKING_POLICY.search(lowered):
         return [{
             "route": "knowledge",
@@ -439,7 +455,13 @@ def dispatch(state: AgentState) -> list[Send]:
 def _run_agent(state: AgentState, route: str) -> dict:
     """Shared body for every agent node: tools, then a grounded reply."""
     started = time.perf_counter()
-    scope = state.get("scope") or {}
+    scope = dict(state.get("scope") or {})
+    if not scope.get("subject_user_id") and state.get("patient_id"):
+        scope.update({
+            "subject_user_id": state.get("patient_id"),
+            "role": "patient",
+            "permissions": "self",
+        })
     decision = state.get("_route") or {"route": route}
 
     tool_texts: list[str] = []
@@ -809,7 +831,9 @@ def merge_node(state: AgentState) -> dict:
     if completion:
         answer, source = completion.text, completion.provider
     else:
-        answer = "\n\n".join(o["answer"] for o in outputs)
+        answer = "\n\n".join(
+            o["answer"].strip() for o in outputs if o.get("answer") and o["answer"].strip()
+        )
         source = "concatenated"
 
     return {
@@ -881,9 +905,17 @@ def fulfil_node(state: AgentState) -> dict:
         "suggested_tests": tests,
     }
 
+    scope = dict(state.get("scope") or {})
+    if not scope.get("subject_user_id") and state.get("patient_id"):
+        scope.update({
+            "subject_user_id": state.get("patient_id"),
+            "role": "patient",
+            "permissions": "self",
+        })
+
     with agent_session() as db:
         pad, loop_trace = run_loop(
-            context=context, scope=state.get("scope") or {}, db=db
+            context=context, scope=scope, db=db
         )
 
     # Merge every payload the loop gathered. Providers accumulate across

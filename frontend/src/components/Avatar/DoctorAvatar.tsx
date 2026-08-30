@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Icon from "../Icon";
+import Markdown from "../Markdown";
 import * as voice from "../../lib/voice";
 import { scriptForRules, spokenForm, type FirstAidScript } from "./firstAid";
 
@@ -290,22 +291,40 @@ export default function DoctorAvatar({
         ["--sp-avatar-calm" as string]: "var(--color-brand-700, #0e7c86)",
       }}
     >
-      <div className="flex items-start gap-3">
-        <div className={mood === "urgent" ? "text-danger-text" : "text-brand-600"}>
-          <Face state={state} mouth={mouth} mood={mood} still={reducedMotion} />
+      <div className="flex items-start gap-3.5">
+        <div className="relative shrink-0">
+          <div className={`${mood === "urgent" ? "text-danger-text" : "text-brand-600"} ${speaking ? "scale-105 transition-transform" : ""}`}>
+            <Face state={state} mouth={mouth} mood={mood} still={reducedMotion} />
+          </div>
+          {speaking && !reducedMotion && (
+            <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-white shadow-xs">
+              <span className="h-2 w-2 animate-ping rounded-full bg-white opacity-75" />
+            </span>
+          )}
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-ink-900">
-            {speakerName
-              ? `${speakerName} says`
-              : variant === "doctor"
-                ? "A message from your care team"
-                : "SuwaPath Assistant"}
-          </p>
-          <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-ink-800">
-            {message}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-ink-900 flex items-center gap-2">
+              <span>
+                {speakerName
+                  ? `${speakerName}`
+                  : variant === "doctor"
+                    ? "Care Team Message"
+                    : "SuwaPath Assistant"}
+              </span>
+              {speaking && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full animate-pulse">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand-600" />
+                  Speaking
+                </span>
+              )}
+            </p>
+          </div>
+
+          <div className="mt-1.5 text-sm leading-relaxed text-ink-800">
+            <Markdown content={message} />
+          </div>
 
           {noVoice && (
             <p className="mt-2 rounded-lg bg-canvas px-2.5 py-1.5 text-xs text-ink-600">
@@ -319,11 +338,33 @@ export default function DoctorAvatar({
             <button
               type="button"
               onClick={() => (speaking ? (voice.stopSpeaking(), stopMouth(), setState("idle")) : say(message))}
-              className="sp-btn sp-btn-ghost !py-1.5 text-xs"
+              className={`sp-btn !py-1.5 text-xs inline-flex items-center gap-1.5 transition ${
+                speaking
+                  ? "sp-btn-secondary !border-brand-500 !text-brand-700 bg-brand-50"
+                  : "sp-btn-ghost"
+              }`}
             >
-              <Icon name={speaking ? "close" : "volumeUp"} size={14} />
-              {speaking ? "Stop" : "Read aloud"}
+              {speaking ? (
+                <>
+                  <Icon name="close" size={14} />
+                  <span>Stop voice</span>
+                </>
+              ) : (
+                <>
+                  <Icon name="volumeUp" size={14} />
+                  <span>Read aloud</span>
+                </>
+              )}
             </button>
+
+            {speaking && !reducedMotion && (
+              <div className="flex items-center gap-0.5 px-2 py-1 bg-brand-50 rounded-lg">
+                <span className="w-1 h-3.5 bg-brand-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                <span className="w-1 h-4.5 bg-brand-600 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                <span className="w-1 h-3 bg-brand-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span className="w-1 h-5 bg-brand-700 rounded-full animate-bounce" style={{ animationDelay: "75ms" }} />
+              </div>
+            )}
 
             {script && (
               <button

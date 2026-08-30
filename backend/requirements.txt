@@ -45,3 +45,7 @@ onnxruntime>=1.17,<1.20
 
 # Background scheduler for the autonomy layer (in-process, no broker).
 APScheduler==3.11.2
+
+# --- Testing ---
+pytest==8.3.4
+pytest-asyncio==0.25.0

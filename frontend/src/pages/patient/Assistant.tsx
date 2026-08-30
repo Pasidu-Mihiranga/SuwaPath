@@ -1330,19 +1330,19 @@ function TurnBubble({
             language={language}
           />
         ) : spokenCare ? (
-          // The everyday case, and the one this feature is really for: a
-          // patient on the elderly or maternal pathway, or anyone who turned
-          // on large text, gets every reply offered aloud rather than only
-          // the emergencies. It does not speak unprompted — see `autoSpeak`.
           <DoctorAvatar
             variant="care"
             message={turn.content}
             language={language}
           />
         ) : null}
-        <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3 text-ink-800">
-          <Markdown content={turn.content} />
-        </div>
+        
+        {/* Render markdown bubble only when not already presented by the care avatar */}
+        {!spokenCare && (
+          <div className="rounded-2xl rounded-bl-md border border-line bg-surface px-4 py-3 text-ink-800">
+            <Markdown content={turn.content} />
+          </div>
+        )}
 
         {/* Provenance: how this answer was produced. */}
         <div className="flex flex-wrap items-center gap-1.5 px-1">

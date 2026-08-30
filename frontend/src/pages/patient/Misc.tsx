@@ -256,6 +256,19 @@ export function Sharing() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
+  // Add guardian modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [email, setEmail] = useState("");
+  const [label, setLabel] = useState("Family member");
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([
+    "emergency_alerts",
+    "medications",
+    "appointments",
+  ]);
+  const [canBook, setCanBook] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
   async function load() {
     const { data } = await api.get("/patients/me/guardians");
     setGuardians(data);
@@ -287,76 +300,256 @@ export function Sharing() {
     }
   }
 
+  async function handleRevoke(relationshipId: string) {
+    if (!confirm("Are you sure you want to revoke access for this guardian?")) return;
+    setSaving(relationshipId);
+    try {
+      await api.delete(`/patients/me/guardians/${relationshipId}`);
+      await load();
+    } catch (err) {
+      setError(errorMessage(err, "Could not revoke guardian."));
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function handleAddGuardian(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      await api.post("/patients/me/guardians", {
+        guardian_email: email.trim(),
+        relationship_label: label.trim() || "Guardian",
+        permissions: selectedPermissions,
+        can_book_appointments: canBook,
+      });
+      setShowAddModal(false);
+      setEmail("");
+      setLabel("Family member");
+      await load();
+    } catch (err) {
+      setAddError(errorMessage(err, "Could not add guardian."));
+    } finally {
+      setAdding(false);
+    }
+  }
+
   if (loading) return <Spinner />;
 
   return (
-    <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-bold text-ink-900">Sharing & Consent</h1>
-        <p className="text-ink-500">
-          You decide exactly what each family member or carer can see. Nothing is
-          shared unless you turn it on.
-        </p>
-      </header>
+    <div className="max-w-4xl mx-auto space-y-6 pb-12 w-full">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-ink-900 tracking-tight">Sharing & Consent</h1>
+          <p className="text-sm text-ink-500 mt-0.5">
+            You decide exactly what each family member or carer can see. Nothing is shared unless you turn it on.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="sp-btn sp-btn-primary inline-flex items-center gap-1.5 shrink-0"
+        >
+          <Icon name="privacy" size={16} />
+          <span>Add Guardian</span>
+        </button>
+      </div>
 
       <ErrorNote message={error} />
 
       {guardians.length === 0 ? (
-        <Empty
-          title="No guardians linked"
-          hint="You can give a family member limited access to help with your care."
-        />
-      ) : (
-        guardians.map((relationship) => (
-          <Card
-            key={relationship.relationship_id}
-            title={relationship.guardian_name}
-            subtitle={`${relationship.relationship_label} · ${relationship.guardian_email}`}
-            action={
-              relationship.is_active ? (
-                <span className="sp-chip sp-chip-ok">Active</span>
-              ) : (
-                <span className="sp-chip sp-chip-neutral">Revoked</span>
-              )
-            }
+        <div className="rounded-2xl border border-dashed border-ink-200 p-8 text-center bg-surface">
+          <span className="inline-grid h-14 w-14 place-items-center rounded-2xl bg-brand-50 text-brand-700 mx-auto mb-3">
+            <Icon name="privacy" size={28} />
+          </span>
+          <h3 className="font-semibold text-ink-900 text-base">No guardians linked yet</h3>
+          <p className="text-sm text-ink-500 mt-1 max-w-md mx-auto">
+            You can give a family member or caregiver limited access to help with your care, receive emergency alerts, and view your appointments.
+          </p>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="sp-btn sp-btn-primary mt-4 inline-flex items-center gap-1.5"
           >
-            <div className="grid sm:grid-cols-2 gap-2.5">
-              {Object.entries(PERMISSION_LABELS).map(([key, label]) => {
-                const granted = relationship.granted_permissions.includes(key);
-                return (
-                  <button
-                    key={key}
-                    onClick={() => void toggle(relationship, key)}
-                    disabled={saving === relationship.relationship_id}
-                    className={`flex items-center justify-between rounded-xl border px-3.5 py-3 text-sm transition ${
-                      granted
-                        ? "border-brand-400 bg-brand-50 text-brand-900"
-                        : "border-ink-200 text-ink-600 hover:border-ink-300"
-                    }`}
-                  >
-                    <span>{label}</span>
-                    <span
-                      className={`h-5 w-9 rounded-full transition relative ${
-                        granted ? "bg-brand-600" : "bg-ink-200"
-                      }`}
+            <Icon name="privacy" size={15} />
+            <span>Link a Guardian</span>
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {guardians.map((relationship) => (
+            <Card
+              key={relationship.relationship_id}
+              title={relationship.guardian_name ?? relationship.guardian_email}
+              subtitle={`${relationship.relationship_label} · ${relationship.guardian_email}`}
+              action={
+                <div className="flex items-center gap-2">
+                  <span className={`sp-chip ${relationship.is_active ? "sp-chip-ok" : "sp-chip-neutral"}`}>
+                    {relationship.is_active ? "Active" : "Revoked"}
+                  </span>
+                  {relationship.is_active && (
+                    <button
+                      onClick={() => void handleRevoke(relationship.relationship_id)}
+                      disabled={saving === relationship.relationship_id}
+                      className="text-xs text-danger-text hover:underline ml-2"
                     >
-                      <span
-                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                          granted ? "left-[18px]" : "left-0.5"
+                      Revoke
+                    </button>
+                  )}
+                </div>
+              }
+            >
+              <div className="pt-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-ink-500 mb-2.5">
+                  Granted Access Scopes
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {Object.entries(PERMISSION_LABELS).map(([key, labelText]) => {
+                    const granted = relationship.granted_permissions.includes(key);
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => void toggle(relationship, key)}
+                        disabled={saving === relationship.relationship_id || !relationship.is_active}
+                        className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-xs sm:text-sm font-medium transition ${
+                          granted
+                            ? "border-brand-400 bg-brand-50/70 text-brand-900 shadow-xs"
+                            : "border-ink-200 text-ink-600 hover:border-ink-300 bg-white"
                         }`}
-                      />
-                    </span>
-                  </button>
-                );
-              })}
+                      >
+                        <span>{labelText}</span>
+                        <span
+                          className={`h-5 w-9 rounded-full transition relative shrink-0 ${
+                            granted ? "bg-brand-600" : "bg-ink-200"
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                              granted ? "left-[18px]" : "left-0.5"
+                            }`}
+                          />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mt-3.5 pt-3 border-t border-ink-100 flex items-center justify-between text-xs text-ink-500">
+                <span>
+                  {relationship.can_book_appointments
+                    ? "✓ Authorized to book appointments on your behalf."
+                    : "✕ Cannot book appointments on your behalf."}
+                </span>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Add Guardian Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink-900/50 backdrop-blur-xs">
+          <div className="bg-surface rounded-2xl shadow-xl max-w-lg w-full p-6 border border-ink-100 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-ink-100">
+              <h2 className="text-lg font-bold text-ink-900">Add Guardian or Carer</h2>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="text-ink-400 hover:text-ink-700 text-sm font-bold"
+              >
+                ✕
+              </button>
             </div>
-            <p className="text-xs text-ink-500 mt-3">
-              {relationship.can_book_appointments
-                ? "This person can book appointments on your behalf."
-                : "This person cannot book appointments on your behalf."}
-            </p>
-          </Card>
-        ))
+
+            <ErrorNote message={addError} />
+
+            <form onSubmit={handleAddGuardian} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-ink-700 mb-1">
+                  Guardian Email Address <span className="text-danger-text">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="guardian@suwapath.lk"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="sp-input"
+                />
+                <p className="text-[11px] text-ink-500 mt-1">
+                  The person must have an existing SuwaPath account registered with this email.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-ink-700 mb-1">
+                  Relationship Label <span className="text-danger-text">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Son, Daughter, Spouse, Sister, Caregiver"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  className="sp-input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-ink-700 mb-2">
+                  Initial Access Permissions
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {Object.entries(PERMISSION_LABELS).map(([key, labelText]) => (
+                    <label key={key} className="flex items-center gap-2 text-xs text-ink-700 p-2 rounded-lg border border-ink-100 bg-ink-50/40 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedPermissions.includes(key)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedPermissions([...selectedPermissions, key]);
+                          } else {
+                            setSelectedPermissions(selectedPermissions.filter((p) => p !== key));
+                          }
+                        }}
+                        className="rounded accent-brand-600"
+                      />
+                      <span>{labelText}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-1">
+                <label className="flex items-center gap-2 text-xs text-ink-800 font-medium cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={canBook}
+                    onChange={(e) => setCanBook(e.target.checked)}
+                    className="rounded accent-brand-600"
+                  />
+                  <span>Allow guardian to book doctor appointments on my behalf</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-ink-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="sp-btn sp-btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={adding}
+                  className="sp-btn sp-btn-primary"
+                >
+                  {adding ? "Linking…" : "Link Guardian"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

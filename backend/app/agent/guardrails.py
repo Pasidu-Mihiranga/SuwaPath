@@ -83,7 +83,8 @@ _OUT_OF_SCOPE_PATTERNS = [
         r"what\s+(dose|dosage|medicine|medication|drug|tablet)s?\s+(should|do|can)\s+i|"
         r"which\s+(medicine|medication|antibiotic|drug|tablet)s?\s+(should|do|can)\s+i)", re.I)),
     ("dosage", re.compile(
-        r"how\s+(many|much)\s+(mg|ml|tablets?|pills?|capsules?|drops?|\w+)\s+(should|can|do)\s+i"
+        r"\bhow\s+(many|much)\b.{0,40}\b(mg|ml|tablets?|pills?|capsules?|drops?|dose|dosage)\b"
+        r"|\b(what|calculate|give\s+me)\b.{0,30}\b(dose|dosage)\b"
         r"|\bdosage\s+(for|of)\b", re.I)),
     # Route of administration. "How do I inject X" is not a dosage question and
     # slipped past the dosage rule entirely; self-administering an injection is
@@ -222,9 +223,9 @@ def check_input(text: str) -> GuardResult:
 # Phrases that assert certainty SuwaPath is never entitled to.
 _OVERCONFIDENT_PATTERNS = [
     ("definitive_diagnosis", re.compile(
-        r"\byou (definitely |certainly )?have\b(?!\s+(an?\s+)?appointment)", re.I)),
-    ("rules_out", re.compile(r"\b(this|it)\s+(rules?\s+out|is\s+not)\s+\w+", re.I)),
-    ("guarantee", re.compile(r"\b(guaranteed|100%\s+(sure|certain)|no\s+need\s+to\s+worry)\b", re.I)),
+        r"\byou (definitely|certainly|undoubtedly|clearly)\s+(have|suffer\s+from|are\s+diagnosed\s+with)\b", re.I)),
+    ("rules_out", re.compile(r"\b(this|it)\s+(definitely\s+rules?\s+out|completely\s+rules?\s+out)\b", re.I)),
+    ("guarantee", re.compile(r"\b(guaranteed|100%\s+(sure|certain)|there\s+is\s+no\s+need\s+to\s+worry)\b", re.I)),
     ("dismissive", re.compile(r"\b(nothing\s+to\s+worry\s+about|perfectly\s+fine)\b", re.I)),
 ]
 
